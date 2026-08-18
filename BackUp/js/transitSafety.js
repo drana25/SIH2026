@@ -1,0 +1,538 @@
+/**
+ * Verida — Transit Safety & Digital Footprint Module
+ * Two-way Driver/Passenger verification, Origin->Destination Route Fare Intelligence with "Last 3 Passengers Paid",
+ * Internal GPS Live Trip Tracking, and Zero-App Driver Protection workflows.
+ */
+
+import { store } from "./store.js";
+import { SEED_ROUTES, SEED_DRIVERS } from "../data/seedData.js";
+
+export class TransitSafetyManager {
+  constructor() {
+    this.activeRoute = SEED_ROUTES[0];
+    this.activeDriver = SEED_DRIVERS[0];
+    this.activeTrip = null;
+    this.tripTrackingInterval = null;
+    this.tripProgress = 0;
+    this.tripElapsedSec = 0;
+  }
+
+  // --- Initialize Route Planner ---
+  initRoutePlanner(containerId = "route-planner-container") {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+
+    const routes = store.getRoutesForCity(store.currentCityId);
+    this.activeRoute = routes[0] || SEED_ROUTES[0];
+
+    container.innerHTML = `
+      <div class="transit-planner-card">
+        <div class="transit-header-row">
+          <div class="transit-title-block">
+            <h3><i class="fas fa-route"></i> Route Fare Intelligence</h3>
+            <p>Select pickup & destination to see what previous passengers paid.</p>
+          </div>
+          <span class="badge-pill-verified"><i class="fas fa-shield-check"></i> RTO Benchmarked</span>
+        </div>
+
+        <!-- Google Maps-style From -> To Inputs -->
+        <div class="route-inputs-box">
+          <div class="route-input-group">
+            <span class="route-dot start-dot"></span>
+            <div class="input-wrap">
+              <label>Pickup Location (From)</label>
+              <select id="route-from-select" class="route-select">
+                ${routes.map((r, idx) => `
+                  <option value="${r.id}" ${idx === 0 ? "selected" : ""}>📍 ${r.fromName}</option>
+                `).join("")}
+              </select>
+            </div>
+          </div>
+
+          <div class="route-connector-line"></div>
+
+          <div class="route-input-group">
+            <span class="route-dot end-dot"></span>
+            <div class="input-wrap">
+              <label>Destination Drop-off (To)</label>
+              <select id="route-to-select" class="route-select">
+                ${routes.map((r, idx) => `
+                  <option value="${r.id}" ${idx === 0 ? "selected" : ""}>🎯 ${r.toName} (${r.distanceKm} km)</option>
+                `).join("")}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        <!-- Last 3 Passengers Paid Live Ticker Card -->
+        <div class="last3-passengers-card" id="last3-passengers-container">
+          <!-- Rendered dynamically -->
+        </div>
+
+        <!-- Two-Way Digital Footprint & Verification Actions -->
+        <div class="transit-action-grid">
+          <button type="button" class="btn btn-primary btn-block btn-lg" id="scan-driver-qr-btn">
+            <i class="fas fa-qrcode"></i> Scan Driver QR (Create Digital Footprint)
+          </button>
+          
+          <button type="button" class="btn btn-outline btn-block" id="zero-app-driver-btn">
+            <i class="fas fa-car-on"></i> Driver Has No App? (Plate Scanner / Self-Anchor)
+          </button>
+        </div>
+      </div>
+    `;
+
+    this.renderLast3PassengersPaid();
+    this.bindRouteEvents();
+  }
+
+  bindRouteEvents() {
+    const fromSelect = document.getElementById("route-from-select");
+    const toSelect = document.getElementById("route-to-select");
+
+    const updateRoute = (routeId) => {
+      const routes = store.getRoutesForCity(store.currentCityId);
+      const found = routes.find(r => r.id === routeId);
+      if (found) {
+        this.activeRoute = found;
+        if (fromSelect) fromSelect.value = found.id;
+        if (toSelect) toSelect.value = found.id;
+        this.renderLast3PassengersPaid();
+      }
+    };
+
+    if (fromSelect) fromSelect.onchange = (e) => updateRoute(e.target.value);
+    if (toSelect) toSelect.onchange = (e) => updateRoute(e.target.value);
+
+    // Scan Driver QR
+    const scanBtn = document.getElementById("scan-driver-qr-btn");
+    if (scanBtn) {
+      scanBtn.onclick = () => {
+        this.openDriverVerificationModal(this.activeDriver);
+      };
+    }
+
+    // Driver Has No App
+    const zeroAppBtn = document.getElementById("zero-app-driver-btn");
+    if (zeroAppBtn) {
+      zeroAppBtn.onclick = () => {
+        this.openZeroAppModal();
+      };
+    }
+  }
+
+  // --- Render "Last 3 Passengers Paid" Section ---
+  renderLast3PassengersPaid() {
+    const container = document.getElementById("last3-passengers-container");
+    if (!container || !this.activeRoute) return;
+
+    const r = this.activeRoute;
+    const history = r.last3PassengersPaid || [];
+
+    container.innerHTML = `
+      <div class="last3-header">
+        <div class="last3-title">
+          <i class="fas fa-users-viewfinder" style="color: var(--primary);"></i>
+          <strong>Last 3 Passengers Paid on this Exact Route:</strong>
+        </div>
+        <span class="fair-median-badge">Fair Range: ₹${r.fairRange.min}–₹${r.fairRange.median}</span>
+      </div>
+
+      <div class="last3-history-list">
+        ${history.map((item, idx) => `
+          <div class="last3-item animate-fade-in" style="animation-delay: ${idx * 0.08}s">
+            <div class="last3-left">
+              <span class="passenger-avatar-icon"><i class="fas fa-user-check"></i></span>
+              <div class="passenger-meta">
+                <span class="p-name"><strong>${item.passengerName}</strong></span>
+                <span class="p-vehicle"><i class="fas fa-taxi"></i> ${item.vehicleNo} (${item.driverName})</span>
+              </div>
+            </div>
+            <div class="last3-right">
+              <span class="p-amount">₹${item.amount}</span>
+              <span class="p-time">${item.timeAgo}</span>
+            </div>
+          </div>
+        `).join("")}
+      </div>
+
+      ${r.toutScamWarning ? `
+        <div class="route-scam-warning">
+          <i class="fas fa-triangle-exclamation"></i>
+          <span><strong>Tout Alert on this Route:</strong> ${r.toutScamWarning}</span>
+        </div>
+      ` : ""}
+    `;
+  }
+
+  // --- Two-Way Digital Footprint: Driver Verification & Safety Card Modal ---
+  openDriverVerificationModal(driver = this.activeDriver) {
+    const modal = document.getElementById("driver-safety-card-modal");
+    const container = document.getElementById("driver-safety-card-content");
+    if (!modal || !container) return;
+
+    const now = new Date();
+    const footprintHash = `VRD-FOOTPRINT-${driver.vehicleRegNo.replace(/-/g, "")}-${Date.now().toString().slice(-6)}`;
+
+    // Log the digital footprint
+    const digitalFootprint = {
+      footprintHash: footprintHash,
+      timestamp: now.toISOString(),
+      formattedTime: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      passengerName: store.activeUser.name,
+      driverName: driver.name,
+      driverPhone: driver.phone,
+      vehicleRegNo: driver.vehicleRegNo,
+      vehicleType: driver.vehicleType,
+      rtoLicenseNo: driver.rtoLicenseNo,
+      route: `${this.activeRoute.fromName} ➔ ${this.activeRoute.toName}`,
+      pickupGps: `${store.currentLocation.lat.toFixed(4)}, ${store.currentLocation.lng.toFixed(4)}`,
+      status: "active_trip"
+    };
+
+    store.recordDigitalFootprint(digitalFootprint);
+
+    container.innerHTML = `
+      <div class="driver-safety-dossier animate-slide-up">
+        
+        <!-- Official Verification Header -->
+        <div class="safety-card-top-bar">
+          <div class="govt-seal-badge">
+            <i class="fas fa-shield-halved"></i>
+            <span>GUJARAT RTO & TOURISM CERTIFIED</span>
+          </div>
+          <span class="badge-trust-high"><i class="fas fa-star"></i> ${driver.rating} ★ (${driver.trustScore}% Trust)</span>
+        </div>
+
+        <!-- Driver Profile Bio -->
+        <div class="driver-profile-main">
+          <img src="${driver.photo}" alt="${driver.name}" class="driver-card-avatar">
+          <div class="driver-card-bio">
+            <h3 class="driver-name">${driver.name}</h3>
+            <div class="vehicle-plate-pill">
+              <i class="fas fa-id-badge"></i> Vehicle No: <strong>${driver.vehicleRegNo}</strong>
+            </div>
+            <p class="lic-info"><i class="fas fa-file-contract"></i> RTO License: <strong>${driver.rtoLicenseNo}</strong></p>
+            <p class="issuer-info"><i class="fas fa-building-shield"></i> Issuer: ${driver.govtIssuer}</p>
+          </div>
+        </div>
+
+        <!-- Digital Footprint Confirmation Box -->
+        <div class="footprint-anchor-box">
+          <div class="footprint-anchor-header">
+            <i class="fas fa-fingerprint"></i>
+            <strong>PASSENGER DIGITAL FOOTPRINT LOGGED</strong>
+          </div>
+          <div class="footprint-meta-grid">
+            <div><span class="f-lbl">Passenger:</span> <strong>${store.activeUser.name}</strong></div>
+            <div><span class="f-lbl">Trip Start Time:</span> ${digitalFootprint.formattedTime}</div>
+            <div><span class="f-lbl">Selected Route:</span> ${this.activeRoute.fromName} ➔ ${this.activeRoute.toName}</div>
+            <div><span class="f-lbl">Footprint ID:</span> <code>${footprintHash}</code></div>
+          </div>
+        </div>
+
+        <!-- Emergency Direct-Dial Quick Action Bar -->
+        <div class="emergency-dials-section">
+          <h4><i class="fas fa-phone-volume"></i> Emergency Quick-Dial & Safety Helplines:</h4>
+          
+          <div class="emergency-dials-grid">
+            <a href="tel:${driver.phone.replace(/[^0-9+]/g, '')}" class="dial-btn dial-driver">
+              <i class="fas fa-phone"></i>
+              <span>Driver<br><strong>${driver.phone}</strong></span>
+            </a>
+
+            <a href="tel:181" class="dial-btn dial-women" title="181 Abhayam Women Helpline (Gujarat)">
+              <i class="fas fa-person-dress"></i>
+              <span>Women's Safety<br><strong>181 / 1090</strong></span>
+            </a>
+
+            <a href="tel:02652223333" class="dial-btn dial-police" title="Sayajigunj Police Desk">
+              <i class="fas fa-shield"></i>
+              <span>Local Police<br><strong>Sayajigunj Desk</strong></span>
+            </a>
+
+            <a href="tel:1363" class="dial-btn dial-tourist" title="National Tourist Helpline">
+              <i class="fas fa-headset"></i>
+              <span>Tourist Police<br><strong>1363</strong></span>
+            </a>
+          </div>
+        </div>
+
+        <!-- Live Trip Start Button -->
+        <div class="start-trip-actions">
+          <button type="button" class="btn btn-primary btn-block btn-lg" id="start-live-tracking-btn">
+            <i class="fas fa-location-arrow"></i> Start Live Internal GPS Trip Tracking
+          </button>
+          
+          <button type="button" class="btn btn-outline btn-block" id="share-live-beacon-btn">
+            <i class="fas fa-share-nodes"></i> Share Live Safety Footprint via WhatsApp
+          </button>
+        </div>
+
+      </div>
+    `;
+
+    modal.classList.add("active");
+
+    // Bind Start Live Tracking
+    const trackBtn = document.getElementById("start-live-tracking-btn");
+    if (trackBtn) {
+      trackBtn.onclick = () => {
+        modal.classList.remove("active");
+        this.startLiveTrip(digitalFootprint);
+      };
+    }
+
+    // Share Live Safety Beacon
+    const shareBtn = document.getElementById("share-live-beacon-btn");
+    if (shareBtn) {
+      shareBtn.onclick = () => {
+        const text = `🛡️ *VERIDA TRANSIT SAFETY BEACON*\nPassenger: ${store.activeUser.name}\nDriver: ${driver.name} (${driver.phone})\nVehicle No: ${driver.vehicleRegNo}\nRoute: ${this.activeRoute.fromName} to ${this.activeRoute.toName}\nFootprint Hash: ${footprintHash}\nEmergency Police: 112 | Women Helpline: 181`;
+        if (navigator.share) {
+          navigator.share({ title: "Verida Transit Safety Beacon", text });
+        } else {
+          window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, "_blank");
+        }
+      };
+    }
+  }
+
+  // --- "Driver Has No App" Self-Protection Modal ---
+  openZeroAppModal() {
+    const modal = document.getElementById("zero-app-modal");
+    const container = document.getElementById("zero-app-content");
+    if (!modal || !container) return;
+
+    container.innerHTML = `
+      <div class="zero-app-box animate-slide-up">
+        <div class="zero-app-header">
+          <div class="zero-app-icon"><i class="fas fa-car-burst"></i></div>
+          <div>
+            <h3>Driver Has No App? You're Still 100% Protected</h3>
+            <p>Enter or snap the auto-rickshaw plate number to anchor your safety footprint.</p>
+          </div>
+        </div>
+
+        <div class="zero-app-methods">
+          
+          <!-- Method 1: Enter Vehicle Plate -->
+          <div class="method-card">
+            <label><strong>1. Enter Vehicle Number Plate (from vehicle or meter):</strong></label>
+            <div class="plate-input-row">
+              <input type="text" id="manual-plate-input" placeholder="e.g. GJ-06-AU-7892" value="GJ-06-AU-7892" class="plate-text-input">
+              <button type="button" class="btn btn-primary" id="anchor-plate-btn">
+                <i class="fas fa-shield-check"></i> Anchor Footprint
+              </button>
+            </div>
+            <span class="input-hint"><i class="fas fa-info-circle"></i> Checks Vadodara RTO database & attaches vehicle ID to police GPS radar.</span>
+          </div>
+
+          <!-- Method 2: Instant No-App Web Slip for Driver -->
+          <div class="method-card" style="margin-top: 14px;">
+            <label><strong>2. Show This Web Slip to Driver (No App Download Needed):</strong></label>
+            <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">The driver can point their phone camera to view their passenger verification card and agreed fare instantly in any browser:</p>
+            
+            <div class="driver-web-qr-box">
+              <div id="driver-web-slip-qr"></div>
+              <div class="web-qr-info">
+                <span class="web-badge">Standard Browser Web Slip</span>
+                <span class="web-url">verida.app/slip/trv_${store.activeUser.name.slice(0,3)}</span>
+                <span class="web-fare">Agreed Fare: <strong>₹${this.activeRoute.fairRange.median}</strong></span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Method 3: Instant WhatsApp Safety Beacon -->
+          <div class="method-card" style="margin-top: 14px;">
+            <button type="button" class="btn btn-danger btn-block" id="broadcast-beacon-btn">
+              <i class="fas fa-broadcast-tower"></i> Broadcast Safety Beacon to Family & Police
+            </button>
+          </div>
+
+        </div>
+      </div>
+    `;
+
+    modal.classList.add("active");
+
+    // Render QR for driver web slip
+    setTimeout(() => {
+      const qrBox = document.getElementById("driver-web-slip-qr");
+      if (qrBox && typeof QRCode !== "undefined") {
+        qrBox.innerHTML = "";
+        new QRCode(qrBox, {
+          text: `https://verida.app/slip?p=${encodeURIComponent(store.activeUser.name)}&r=${encodeURIComponent(this.activeRoute.toName)}&fare=${this.activeRoute.fairRange.median}`,
+          width: 90,
+          height: 90,
+          colorDark: "#0f172a",
+          colorLight: "#ffffff"
+        });
+      }
+    }, 100);
+
+    // Anchor Vehicle Plate
+    const anchorBtn = document.getElementById("anchor-plate-btn");
+    if (anchorBtn) {
+      anchorBtn.onclick = () => {
+        const plate = document.getElementById("manual-plate-input")?.value.trim() || "GJ-06-AU-7892";
+        modal.classList.remove("active");
+        
+        // Create custom driver profile from plate
+        const synthesizedDriver = {
+          id: `driver-manual-${plate}`,
+          name: "Registered Vadodara Transport Driver",
+          photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
+          phone: "+91 94260 55321",
+          vehicleType: "Auto-Rickshaw (Plate Anchored)",
+          vehicleRegNo: plate,
+          rtoLicenseNo: `GJ-06-RTO-${plate.slice(-4)}`,
+          govtIssuer: "Gujarat RTO Registered Vehicle",
+          rating: 4.9,
+          trustScore: 97
+        };
+
+        this.openDriverVerificationModal(synthesizedDriver);
+      };
+    }
+
+    // Broadcast Beacon
+    const broadcastBtn = document.getElementById("broadcast-beacon-btn");
+    if (broadcastBtn) {
+      broadcastBtn.onclick = () => {
+        const plate = document.getElementById("manual-plate-input")?.value.trim() || "GJ-06-AU-7892";
+        const text = `🚨 *VERIDA PASSENGER LIVE SAFETY BEACON*\nPassenger: ${store.activeUser.name}\nVehicle Plate: ${plate}\nRoute: ${this.activeRoute.fromName} -> ${this.activeRoute.toName}\nLive GPS: https://maps.google.com/?q=${store.currentLocation.lat},${store.currentLocation.lng}\nWomen Safety: 181 | Police: 112`;
+        window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, "_blank");
+      };
+    }
+  }
+
+  // --- Internal Live GPS Trip Tracker ---
+  startLiveTrip(footprint) {
+    this.activeTrip = footprint;
+    this.tripProgress = 0;
+    this.tripElapsedSec = 0;
+
+    const hud = document.getElementById("live-trip-tracker-hud");
+    if (hud) {
+      hud.classList.remove("hidden");
+      this.updateTripHud();
+    }
+
+    // Clear existing interval
+    if (this.tripTrackingInterval) clearInterval(this.tripTrackingInterval);
+
+    // Simulate GPS breadcrumb movement every 2 seconds
+    this.tripTrackingInterval = setInterval(() => {
+      this.tripElapsedSec += 2;
+      this.tripProgress = Math.min(100, this.tripProgress + 4);
+
+      this.updateTripHud();
+
+      if (this.tripProgress >= 100) {
+        clearInterval(this.tripTrackingInterval);
+        this.tripTrackingInterval = null;
+        this.completeTrip();
+      }
+    }, 2000);
+  }
+
+  updateTripHud() {
+    const hud = document.getElementById("live-trip-tracker-hud");
+    if (!hud || !this.activeTrip) return;
+
+    const remainingKm = ((1 - this.tripProgress / 100) * (this.activeRoute.distanceKm || 3.4)).toFixed(1);
+    const speed = this.tripProgress < 100 ? (24 + (this.tripProgress % 8)) : 0;
+
+    hud.innerHTML = `
+      <div class="trip-hud-inner animate-slide-up">
+        <div class="trip-hud-top">
+          <div class="trip-status-col">
+            <span class="trip-live-indicator"><span class="gps-live-dot"></span> LIVE TRIP TRACKING</span>
+            <span class="trip-route-title">${this.activeRoute.fromName} ➔ ${this.activeRoute.toName}</span>
+          </div>
+          <button type="button" class="btn-trip-sos" onclick="veridaApp.triggerSosFlow()" title="Trigger Police SOS">
+            <span>🚨 SOS</span>
+          </button>
+        </div>
+
+        <div class="trip-progress-bar-wrap">
+          <div class="trip-progress-fill" style="width: ${this.tripProgress}%;"></div>
+        </div>
+
+        <div class="trip-stats-grid">
+          <div class="t-stat"><span class="t-lbl">Speed</span><span class="t-val">${speed} km/h</span></div>
+          <div class="t-stat"><span class="t-lbl">Remaining</span><span class="t-val">${remainingKm} km</span></div>
+          <div class="t-stat"><span class="t-lbl">Vehicle</span><span class="t-val">${this.activeTrip.vehicleRegNo}</span></div>
+          <div class="t-stat"><span class="t-lbl">Safety Radar</span><span class="t-val text-success">Normal Route</span></div>
+        </div>
+
+        <div class="trip-hud-actions">
+          <button type="button" class="btn btn-outline btn-sm" onclick="transitSafety.shareLiveLocation()">
+            <i class="fas fa-share-nodes"></i> Share Live GPS
+          </button>
+          <button type="button" class="btn btn-danger btn-sm" onclick="transitSafety.endTripEarly()">
+            <i class="fas fa-flag-checkered"></i> End Trip & Log Rate
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  shareLiveLocation() {
+    const text = `📍 *LIVE TRANSIT GPS TRACKING (Verida)*\nPassenger: ${store.activeUser.name}\nVehicle: ${this.activeTrip?.vehicleRegNo || 'Auto'}\nLive Position: https://maps.google.com/?q=${store.currentLocation.lat},${store.currentLocation.lng}`;
+    if (navigator.share) {
+      navigator.share({ title: "Live GPS Trip", text });
+    } else {
+      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(text)}`, "_blank");
+    }
+  }
+
+  endTripEarly() {
+    if (this.tripTrackingInterval) {
+      clearInterval(this.tripTrackingInterval);
+      this.tripTrackingInterval = null;
+    }
+    this.completeTrip();
+  }
+
+  completeTrip() {
+    const hud = document.getElementById("live-trip-tracker-hud");
+    if (hud) hud.classList.add("hidden");
+
+    // Prompt for price paid to feed into "Last 3 Passengers Paid"
+    const modal = document.getElementById("price-prompt-modal");
+    if (modal) {
+      const title = document.getElementById("price-prompt-title");
+      if (title) title.textContent = `You reached ${this.activeRoute.toName}! What did you pay?`;
+      modal.classList.add("active");
+
+      const submitBtn = document.getElementById("price-prompt-submit-btn");
+      if (submitBtn) {
+        submitBtn.onclick = () => {
+          const customVal = document.getElementById("price-prompt-custom-amount")?.value;
+          const paidAmount = customVal && parseFloat(customVal) > 0 ? parseFloat(customVal) : this.activeRoute.fairRange.median;
+
+          // Append to route's last3PassengersPaid
+          if (!this.activeRoute.last3PassengersPaid) this.activeRoute.last3PassengersPaid = [];
+          this.activeRoute.last3PassengersPaid.unshift({
+            passengerName: `${store.activeUser.name} (You)`,
+            amount: Math.round(paidAmount),
+            timeAgo: "Just now",
+            vehicleNo: this.activeTrip?.vehicleRegNo || "GJ-06-AU-7892",
+            driverName: this.activeTrip?.driverName || "Mehul Bhai"
+          });
+
+          if (this.activeRoute.last3PassengersPaid.length > 3) {
+            this.activeRoute.last3PassengersPaid = this.activeRoute.last3PassengersPaid.slice(0, 3);
+          }
+
+          this.renderLast3PassengersPaid();
+          modal.classList.remove("active");
+          alert("🎉 Trip Completed! Your payment has been added to the 'Last 3 Passengers Paid' live ticker to protect the next traveler.");
+        };
+      }
+    }
+  }
+}
+
+export const transitSafety = new TransitSafetyManager();

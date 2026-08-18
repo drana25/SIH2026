@@ -1,0 +1,558 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Verida — On-the-Spot Tourism & Transit Trust Protocol</title>
+  <meta name="description" content="Real-time trust for unbooked in-person tourism & rickshaw transit with Passenger Digital Footprints, Route Fare Intelligence, 2-Way Driver Verification, and Live GPS Trip Tracking.">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/components.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+
+  <!-- Stage Control Bar -->
+  <header class="stage-control-bar">
+    <div class="stage-bar-left">
+      <span class="stage-logo-badge">VERIDA</span>
+      <span style="font-size:12px;color:#94a3b8;">Transit & Tourism Trust Protocol</span>
+    </div>
+    <div class="stage-bar-right">
+      <select id="demo-teleport-select" class="stage-select" title="Simulate GPS Location">
+        <option value="">🎯 Teleport GPS...</option>
+        <option value="vad-laxmi-vilas">📍 Vadodara: Laxmi Vilas Palace</option>
+        <option value="vad-station-hotspot">⚠️ Vadodara: Station (Tout Zone)</option>
+        <option value="vad-champaner">📍 Vadodara: Champaner UNESCO</option>
+        <option value="vad-sayaji-baug">📍 Vadodara: Sayaji Baug</option>
+        <option value="agr-taj-mahal">📍 Agra: Taj Mahal East Gate</option>
+        <option value="del-red-fort">⚠️ Delhi: Red Fort (Scam Zone)</option>
+        <option value="jai-hawa-mahal">📍 Jaipur: Hawa Mahal</option>
+      </select>
+      <button type="button" class="btn-stage" id="toggle-view-mode-btn" title="Toggle Phone Simulator">
+        <i class="fas fa-mobile-screen"></i> Phone Frame
+      </button>
+      <button type="button" class="btn-stage" id="toggle-dual-screen-btn" title="Dual Stage: Passenger + Driver">
+        <i class="fas fa-columns"></i> Dual Stage View
+      </button>
+    </div>
+  </header>
+
+  <!-- ===== SINGLE APP SHELL (Laptop + Mobile) ===== -->
+  <div class="app-viewport-wrapper" id="single-app-shell">
+
+    <header class="app-header">
+      <div class="header-top-row">
+        <div class="brand-identity">
+          <div class="brand-icon"><i class="fas fa-shield-halved"></i></div>
+          <div>
+            <h1 class="brand-title">Verida</h1>
+            <span class="brand-tagline">Transit Safety & Trust Protocol</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <!-- Profile button opens login/register modal -->
+          <button type="button" class="btn-profile-pill" id="header-profile-btn" title="Your Profile / Register">
+            <i class="fas fa-user-circle"></i>
+            <span id="header-user-display-name">Devanshi Sharma</span>
+          </button>
+          <div class="city-select-box">
+            <select id="header-city-selector" aria-label="Select City"></select>
+          </div>
+        </div>
+      </div>
+
+      <div class="role-toggle-container">
+        <button type="button" class="role-toggle-btn active" data-role="traveler">
+          <i class="fas fa-user-shield"></i> Passenger Mode
+        </button>
+        <button type="button" class="role-toggle-btn" data-role="guide">
+          <i class="fas fa-id-card-clip"></i> Driver / Guide Mode
+        </button>
+      </div>
+
+      <div class="location-status-bar">
+        <span class="location-pill" id="current-location-pill">
+          <span class="gps-live-dot"></span> Laxmi Vilas Palace, Vadodara
+        </span>
+        <span style="font-size:11px;color:var(--slate-500);"><i class="fas fa-satellite"></i> GPS Active</span>
+      </div>
+    </header>
+
+    <!-- Desktop Nav -->
+    <nav class="desktop-nav-bar" aria-label="Desktop Navigation">
+      <button type="button" class="desktop-nav-link active" data-tab="transit"><i class="fas fa-route"></i> Transit & Routes</button>
+      <button type="button" class="desktop-nav-link" data-tab="handshake"><i class="fas fa-handshake"></i> Handshake</button>
+      <button type="button" class="desktop-nav-link" data-tab="radar"><i class="fas fa-map-location-dot"></i> Hotspot Radar</button>
+      <button type="button" class="desktop-nav-link" data-tab="camera"><i class="fas fa-camera"></i> Price Camera</button>
+      <button type="button" class="desktop-nav-link" data-tab="pulses"><i class="fas fa-chart-line"></i> Live Pulse</button>
+      <button type="button" class="desktop-nav-link" data-tab="ledger"><i class="fas fa-book-bookmark"></i> Ledger</button>
+    </nav>
+
+    <!-- Proactive Scam Banner -->
+    <div id="hotspot-proactive-banner" class="proactive-alert-banner hidden"></div>
+
+    <!-- Ticker Strip -->
+    <div class="pulse-ticker-container" id="price-ticker-strip">
+      <span class="pulse-ticker-label"><i class="fas fa-bolt"></i> LIVE PULSE</span>
+      <div class="pulse-ticker-feed" id="price-pulse-ticker"></div>
+    </div>
+
+    <!-- Live Trip HUD (floats during active trip) -->
+    <div id="live-trip-tracker-hud" class="live-trip-hud hidden"></div>
+
+    <main class="app-content-scroll">
+
+      <!-- === TRAVELER / PASSENGER VIEW === -->
+      <div id="traveler-view-container">
+
+        <!-- TAB 0: Transit Safety (DEFAULT) -->
+        <section id="tab-transit" class="tab-content-panel active">
+          <div id="route-planner-container"></div>
+        </section>
+
+        <!-- TAB 1: Digital Handshake -->
+        <section id="tab-handshake" class="tab-content-panel">
+          <div class="handshake-hero-card">
+            <div class="hero-icon-bubble"><i class="fas fa-handshake-simple"></i></div>
+            <h2>Digital Handshake</h2>
+            <p class="hero-subtitle">Verify any rickshaw driver, guide, or stranger in 5 seconds using a GPS-locked rotating QR code. Works even when they have no app.</p>
+            <div class="hero-action-box">
+              <button type="button" class="btn btn-primary btn-block btn-lg" id="simulate-scan-btn">
+                <i class="fas fa-qrcode"></i> Execute Instant Handshake (Demo)
+              </button>
+              <button type="button" class="btn btn-outline btn-block" id="start-camera-scan-btn">
+                <i class="fas fa-camera"></i> Open Camera QR Scanner
+              </button>
+            </div>
+            <div class="value-prop-grid">
+              <div class="prop-card"><i class="fas fa-shield-check prop-icon"></i><span class="prop-title">Govt Verified</span><span class="prop-desc">RTO / Gujarat Tourism</span></div>
+              <div class="prop-card"><i class="fas fa-fingerprint prop-icon"></i><span class="prop-title">Digital Footprint</span><span class="prop-desc">Logged with police radar</span></div>
+              <div class="prop-card"><i class="fas fa-lock prop-icon"></i><span class="prop-title">Anti-Tamper</span><span class="prop-desc">15s rotating token</span></div>
+            </div>
+          </div>
+          <div id="camera-scanner-wrapper" class="camera-scanner-card hidden">
+            <div class="camera-scanner-header">
+              <span><i class="fas fa-expand"></i> Align Driver / Guide QR Code</span>
+              <button type="button" class="modal-close-btn" id="close-camera-scanner-btn" style="position:static;"><i class="fas fa-times"></i></button>
+            </div>
+            <div id="qr-reader"></div>
+          </div>
+          <div style="background:#f8fafc;border:1px dashed #cbd5e1;border-radius:var(--radius-lg);padding:14px;font-size:12px;color:#475569;margin-top:16px;">
+            <strong style="color:#0f172a;font-size:13px;"><i class="fas fa-lightbulb" style="color:#f59e0b;"></i> The Verida Angle:</strong>
+            <p style="margin-top:4px;line-height:1.5;">Every other platform only protects you when you pre-book. <strong>Verida protects you on-the-spot</strong>, in cash, from a stranger — exactly where 90%+ of real scams happen.</p>
+          </div>
+        </section>
+
+        <!-- TAB 2: Hotspot Radar -->
+        <section id="tab-radar" class="tab-content-panel">
+          <div class="section-heading-row" style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h3 style="font-size:16px;font-weight:800;">Scam Hotspots Radar</h3>
+              <span style="font-size:12px;color:var(--slate-500);">Live geofencing + full landmark directory</span>
+            </div>
+            <span style="background:#fee2e2;color:#dc2626;padding:4px 10px;border-radius:6px;font-size:11px;font-weight:700;"><i class="fas fa-radiation"></i> Geofencing Active</span>
+          </div>
+          <div class="hotspots-directory-header">
+            <input type="text" id="hotspot-search-input" class="hotspots-search-input" placeholder="🔍 Search places, landmarks, market touts...">
+            <div class="hotspots-category-pills">
+              <button type="button" class="hotspot-cat-btn active" data-cat="all">All Locations</button>
+              <button type="button" class="hotspot-cat-btn" data-cat="scam">🚨 Tout Hotspots</button>
+              <button type="button" class="hotspot-cat-btn" data-cat="Heritage">🏛️ Heritage</button>
+              <button type="button" class="hotspot-cat-btn" data-cat="Gardens">🌳 Nature & Lakes</button>
+              <button type="button" class="hotspot-cat-btn" data-cat="Temples">🕉️ Temples</button>
+              <button type="button" class="hotspot-cat-btn" data-cat="Food">🍲 Food</button>
+              <button type="button" class="hotspot-cat-btn" data-cat="Day Trips">🚗 Day Trips</button>
+            </div>
+          </div>
+          <div class="tab-split-grid">
+            <div>
+              <div class="hotspot-map-container"><div id="hotspot-map"></div></div>
+              <div style="margin-top:8px;font-size:11px;color:var(--slate-500);display:flex;justify-content:space-between;">
+                <span><i class="fas fa-circle" style="color:#ef4444;"></i> Red = High Risk Tout Zone</span>
+                <span><i class="fas fa-circle" style="color:#059669;"></i> Green = Verified Landmark</span>
+              </div>
+            </div>
+            <div class="hotspots-directory-list" id="hotspots-directory-list"></div>
+          </div>
+        </section>
+
+        <!-- TAB 3: Price Camera -->
+        <section id="tab-camera" class="tab-content-panel">
+          <div class="section-heading-row">
+            <h3 style="font-size:16px;font-weight:800;">Point-and-Check Price Camera</h3>
+            <span style="font-size:12px;color:var(--slate-500);">Snap any price slip → Red / Yellow / Green verdict</span>
+          </div>
+          <div class="tab-split-grid">
+            <div>
+              <div class="price-camera-viewport">
+                <video id="camera-stream-video" class="price-camera-video" playsinline muted autoplay></video>
+                <div class="camera-hud-overlay">
+                  <div class="camera-hud-top"><span><i class="fas fa-camera"></i> Tesseract OCR</span><span id="ocr-status-indicator">Ready to scan</span></div>
+                  <div class="hud-target-frame"><div class="hud-scan-line"></div></div>
+                  <div class="camera-hud-bottom">Center the price chit inside frame</div>
+                </div>
+              </div>
+              <button type="button" class="btn btn-primary btn-block btn-lg" id="price-camera-snap-btn" style="margin-top:12px;">
+                <i class="fas fa-camera-retro"></i> Snap & Check Price
+              </button>
+            </div>
+            <div class="sample-chits-carousel">
+              <h4 style="font-size:13px;font-weight:700;color:var(--slate-700);margin-bottom:8px;"><i class="fas fa-bolt" style="color:#f59e0b;"></i> Quick Test Chits:</h4>
+              <div class="sample-chits-grid">
+                <button type="button" class="sample-chit-btn" data-chit="sample-chit-vad-overcharge"><strong style="color:#dc2626;">🚨 Scam:</strong> Vadodara Auto ₹450 (Fair: ₹100)</button>
+                <button type="button" class="sample-chit-btn" data-chit="sample-chit-vad-fair"><strong style="color:#059669;">✅ Fair:</strong> Palace Guide ₹450 (Standard)</button>
+                <button type="button" class="sample-chit-btn" data-chit="sample-chit-agr-overcharge"><strong style="color:#dc2626;">🚨 Scam:</strong> Taj Mahal Fake VIP ₹2,500</button>
+                <button type="button" class="sample-chit-btn" data-chit="sample-chit-del-rickshaw"><strong style="color:#d97706;">🟡 High:</strong> Red Fort Rickshaw ₹150</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- TAB 4: Live Price Pulse -->
+        <section id="tab-pulses" class="tab-content-panel">
+          <div class="section-heading-row" style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <h3 style="font-size:16px;font-weight:800;">Live Price Pulse</h3>
+              <span style="font-size:12px;color:var(--slate-500);">Real rates paid by recent verified travelers</span>
+            </div>
+          </div>
+          <div class="pulse-filter-bar">
+            <button type="button" class="pulse-filter-pill active" data-category="all">All Services</button>
+            <button type="button" class="pulse-filter-pill" data-category="Auto-Rickshaw">Auto-Rickshaw</button>
+            <button type="button" class="pulse-filter-pill" data-category="Official Guide">Official Guide</button>
+            <button type="button" class="pulse-filter-pill" data-category="Taxi">Local Taxi</button>
+            <button type="button" class="pulse-filter-pill" data-category="Food">Food</button>
+          </div>
+          <div class="price-pulse-feed" id="price-pulse-feed"></div>
+        </section>
+
+        <!-- TAB 5: Ledger -->
+        <section id="tab-ledger" class="tab-content-panel">
+          <div id="guide-ledger-container"></div>
+        </section>
+
+      </div>
+
+      <!-- === GUIDE / DRIVER VIEW === -->
+      <div id="guide-view-container" class="hidden">
+
+        <!-- Driver live notification toast (appears when passenger submits price pulse) -->
+        <div id="driver-live-notification-toast" class="driver-notification-toast hidden"></div>
+
+        <div class="guide-qr-wrapper">
+          <div class="guide-badge-header">
+            <img id="driver-profile-avatar" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150" alt="Driver Photo" class="guide-badge-avatar">
+            <div>
+              <div class="guide-badge-name" id="driver-card-name">Mehul Bhai Solanki</div>
+              <div class="guide-badge-lic" id="driver-card-lic">GJ-06-AU-7892 • Green CNG Auto-Rickshaw</div>
+            </div>
+          </div>
+          <p style="font-size:13px;color:var(--slate-600);margin-bottom:14px;text-align:center;">
+            Show this QR to your passenger. It refreshes every 15s to prevent screenshot fraud.
+          </p>
+          <div class="qr-canvas-box"><div id="guide-qr-canvas"></div></div>
+          <div class="qr-countdown-pill" id="qr-countdown-badge">Token refreshes in 15s</div>
+          <p style="margin-top:12px;font-size:11px;color:var(--slate-500);text-align:center;">
+            <i class="fas fa-lock"></i> GPS + timestamp + RTO badge encrypted into token.
+          </p>
+        </div>
+
+        <div style="margin-top:20px;">
+          <h4 style="font-size:14px;font-weight:800;margin-bottom:10px;"><i class="fas fa-list-check"></i> My Passenger Encounter Ledger</h4>
+          <div id="guide-self-ledger" class="timeline-list"></div>
+        </div>
+      </div>
+
+    </main>
+
+    <!-- Floating SOS -->
+    <button type="button" class="floating-sos-btn" id="emergency-sos-floating-btn" title="Emergency SOS">
+      <span>SOS</span>
+    </button>
+
+    <!-- Mobile Bottom Nav -->
+    <nav class="app-bottom-nav">
+      <button type="button" class="nav-tab-btn active" data-tab="transit"><i class="fas fa-route"></i><span>Transit</span></button>
+      <button type="button" class="nav-tab-btn" data-tab="handshake"><i class="fas fa-handshake"></i><span>Verify</span></button>
+      <button type="button" class="nav-tab-btn" data-tab="radar"><i class="fas fa-map-location-dot"></i><span>Hotspots</span></button>
+      <button type="button" class="nav-tab-btn" data-tab="camera"><i class="fas fa-camera"></i><span>Price Cam</span></button>
+      <button type="button" class="nav-tab-btn" data-tab="pulses"><i class="fas fa-chart-line"></i><span>Pulse</span></button>
+      <button type="button" class="nav-tab-btn" data-tab="ledger"><i class="fas fa-book-bookmark"></i><span>Ledger</span></button>
+    </nav>
+  </div>
+
+  <!-- ===== DUAL-SCREEN STAGE LAYOUT (Passenger Phone + Driver Phone side-by-side) ===== -->
+  <div class="dual-stage-layout" id="dual-stage-container">
+
+    <!-- LEFT: Passenger Phone — Full interactive app inside -->
+    <div class="dual-phone-column">
+      <div class="dual-phone-header">
+        <i class="fas fa-user"></i>&nbsp; PASSENGER DEVICE &nbsp;·&nbsp;
+        <span id="dual-passenger-name">Devanshi Sharma</span>
+      </div>
+      <!-- Full embedded app for passenger side in dual mode -->
+      <div class="dual-phone-content" id="dual-passenger-panel">
+
+        <!-- Route & Transit Card -->
+        <div style="background:#f0fdf4;border:1.5px solid #bbf7d0;border-radius:14px;padding:14px;">
+          <div style="font-weight:800;font-size:14px;margin-bottom:8px;"><i class="fas fa-route" style="color:#059669;"></i> Route: Station → Laxmi Vilas</div>
+          <div style="font-size:12px;color:#065f46;">Last 3 Passengers Paid: ₹100 • ₹90 • ₹100</div>
+          <div style="font-size:11px;color:#475569;margin-top:4px;">Fair Median: ₹80–₹100</div>
+        </div>
+
+        <!-- Handshake Button -->
+        <button type="button" class="btn btn-primary btn-block btn-lg" onclick="veridaApp.executeHandshakeFlow()">
+          <i class="fas fa-qrcode"></i> Scan Driver QR (Handshake)
+        </button>
+
+        <!-- Driver Verification -->
+        <button type="button" class="btn btn-outline btn-block" onclick="transitSafety && transitSafety.openDriverVerificationModal()">
+          <i class="fas fa-shield-check"></i> View Driver Safety Card & Emergency Dials
+        </button>
+
+        <!-- No App Flow -->
+        <button type="button" class="btn btn-outline btn-block" onclick="transitSafety && transitSafety.openZeroAppModal()">
+          <i class="fas fa-car-on"></i> Driver Has No App? (Plate Entry)
+        </button>
+
+        <!-- SOS -->
+        <button type="button" class="btn btn-danger btn-block" onclick="veridaApp.triggerSosFlow()">
+          <i class="fas fa-triangle-exclamation"></i> Generate Tourist Police Dossier (1363)
+        </button>
+
+        <!-- Live Pulse mini-strip -->
+        <div style="background:#0f172a;border-radius:10px;padding:8px 12px;font-size:11px;color:#34d399;">
+          <i class="fas fa-bolt"></i> <strong>Live Pulse:</strong> Station→Palace ₹100 (14m ago) • Alkapuri→Sayaji ₹60 (8m ago)
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: Driver Phone — QR + Encounter Ledger -->
+    <div class="dual-phone-column">
+      <div class="dual-phone-header guide-header">
+        <i class="fas fa-taxi"></i>&nbsp; DRIVER DEVICE &nbsp;·&nbsp;
+        <span id="dual-driver-name">Mehul Bhai Solanki</span>
+      </div>
+      <div class="dual-phone-content">
+
+        <!-- Driver live notification toast (shown after passenger submits price) -->
+        <div id="driver-live-notification-toast-dual" class="driver-notification-toast hidden"></div>
+
+        <!-- Driver Profile Card -->
+        <div class="guide-qr-wrapper" style="padding:16px;">
+          <div class="guide-badge-header">
+            <img id="driver-avatar-dual" src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150" alt="Driver" class="guide-badge-avatar">
+            <div>
+              <div class="guide-badge-name" id="driver-card-name-dual">Mehul Bhai Solanki</div>
+              <div class="guide-badge-lic" id="driver-card-lic-dual">GJ-06-AU-7892 • CNG Auto</div>
+            </div>
+          </div>
+
+          <!-- Rotating QR for driver side -->
+          <div class="qr-canvas-box"><div id="guide-qr-canvas-dual"></div></div>
+          <div class="qr-countdown-pill" id="qr-countdown-badge-dual">Token refreshes in 15s</div>
+          <p style="font-size:11px;color:var(--slate-500);text-align:center;margin-top:8px;">
+            Passenger scans this QR to verify and create Digital Footprint
+          </p>
+        </div>
+
+        <!-- Encounter Ledger for driver -->
+        <div>
+          <h4 style="font-size:13px;font-weight:800;margin-bottom:8px;"><i class="fas fa-list-check"></i> Passenger Encounter Log</h4>
+          <div id="guide-self-ledger-dual" class="timeline-list">
+            <!-- Pre-populated example entry -->
+            <div class="timeline-item">
+              <div class="timeline-dot verified"></div>
+              <div class="timeline-card">
+                <div class="timeline-card-header">
+                  <strong>Sophie Martin (Tourist)</strong>
+                  <span class="text-success" style="font-weight:700;">₹450</span>
+                </div>
+                <div class="presence-watermark"><i class="fas fa-shield-check"></i> Proximity Verified (&lt;10m)</div>
+                <p class="review-text">Laxmi Vilas Palace Heritage Tour</p>
+                <span class="token-mono">Hash: 0x98f4a1c7…</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Driver action buttons -->
+        <button type="button" class="btn btn-outline btn-block" onclick="authManager && authManager.openAuthModal('guide')">
+          <i class="fas fa-user-edit"></i> Edit Driver Profile & Plate
+        </button>
+
+      </div>
+    </div>
+
+  </div><!-- end dual-stage-layout -->
+
+
+  <!-- ========== MODALS ========== -->
+
+  <!-- AUTH / REGISTRATION MODAL (Passenger + Driver Sign-Up / Login) -->
+  <div id="auth-modal" class="modal-backdrop">
+    <div class="modal-card" style="max-width:520px;">
+      <button type="button" class="modal-close-btn" id="close-auth-modal-btn"><i class="fas fa-times"></i></button>
+
+      <div style="text-align:center;margin-bottom:20px;">
+        <div style="width:52px;height:52px;background:var(--primary-surface);border-radius:50%;display:flex;align-items:center;justify-content:center;margin:0 auto 10px;font-size:24px;color:var(--primary);border:2px solid var(--primary-light);">
+          <i class="fas fa-shield-halved"></i>
+        </div>
+        <h2 style="font-size:20px;font-weight:800;">Verida Identity Setup</h2>
+        <p style="font-size:12px;color:var(--slate-500);margin-top:4px;">Your profile is stored locally on this device. No account needed.</p>
+      </div>
+
+      <!-- Tab switcher -->
+      <div class="auth-tab-row">
+        <button type="button" class="auth-tab-btn active" data-tab="passenger">
+          <i class="fas fa-user-shield"></i> I'm a Passenger / Tourist
+        </button>
+        <button type="button" class="auth-tab-btn" data-tab="driver">
+          <i class="fas fa-taxi"></i> I'm a Driver / Guide
+        </button>
+      </div>
+
+      <!-- PASSENGER FORM -->
+      <div id="auth-panel-passenger">
+        <form id="passenger-auth-form" style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-user"></i> Your Full Name</label>
+            <input type="text" id="reg-passenger-name" class="auth-input" placeholder="e.g. Devanshi Sharma" required>
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-phone"></i> Your Mobile Number</label>
+            <input type="tel" id="reg-passenger-phone" class="auth-input" placeholder="+91 98765 43210">
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-map-marker-alt"></i> Your Home City / Origin</label>
+            <input type="text" id="reg-passenger-origin" class="auth-input" placeholder="e.g. Vadodara, Gujarat">
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-phone-volume"></i> Emergency Contact (Name & Phone)</label>
+            <input type="text" id="reg-passenger-emergency" class="auth-input" placeholder="e.g. Mum (+91 98765 11223)">
+          </div>
+          <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:10px;padding:10px 12px;font-size:11px;color:#065f46;">
+            <i class="fas fa-shield-check"></i> Your profile helps pre-fill the Digital Footprint and the Tourist Police Evidence Dossier automatically.
+          </div>
+          <button type="submit" class="btn btn-primary btn-block btn-lg">
+            <i class="fas fa-check-circle"></i> Save Passenger Profile & Start
+          </button>
+        </form>
+      </div>
+
+      <!-- DRIVER FORM -->
+      <div id="auth-panel-driver" class="hidden">
+        <form id="driver-auth-form" style="display:flex;flex-direction:column;gap:12px;margin-top:16px;">
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-user"></i> Driver Full Name</label>
+            <input type="text" id="reg-driver-name" class="auth-input" placeholder="e.g. Mehul Bhai Solanki" required>
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-phone"></i> Driver Mobile Number</label>
+            <input type="tel" id="reg-driver-phone" class="auth-input" placeholder="+91 94260 55321">
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-id-badge"></i> Vehicle Registration Number</label>
+            <input type="text" id="reg-driver-plate" class="auth-input" placeholder="e.g. GJ-06-AU-7892" style="text-transform:uppercase;font-family:var(--font-mono);font-weight:700;" required>
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-file-contract"></i> RTO Driving License Number</label>
+            <input type="text" id="reg-driver-lic" class="auth-input" placeholder="e.g. GJ-06-2018-009124">
+          </div>
+          <div class="auth-field-group">
+            <label class="auth-label"><i class="fas fa-taxi"></i> Vehicle Type</label>
+            <select id="reg-driver-type" class="auth-input">
+              <option value="Green CNG Auto-Rickshaw">Green CNG Auto-Rickshaw (Vadodara)</option>
+              <option value="Yellow-Black Auto (Metered)">Yellow-Black Auto (Metered)</option>
+              <option value="AC Sedan Tourist Taxi">AC Sedan Tourist Taxi</option>
+              <option value="Innova Crysta (Tour)">Innova Crysta (Tour)</option>
+              <option value="Heritage Licensed Guide">Heritage Licensed Guide (Not Driver)</option>
+              <option value="Other">Other</option>
+            </select>
+          </div>
+          <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:10px;padding:10px 12px;font-size:11px;color:#1e40af;">
+            <i class="fas fa-info-circle"></i> Your vehicle plate & license are embedded in the rotating QR token. Passengers see this when they scan you.
+          </div>
+          <button type="submit" class="btn btn-primary btn-block btn-lg">
+            <i class="fas fa-qrcode"></i> Activate Driver Profile & Generate QR
+          </button>
+        </form>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- DRIVER SAFETY CARD MODAL -->
+  <div id="driver-safety-card-modal" class="modal-backdrop">
+    <div class="modal-card" style="max-width:520px;">
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('driver-safety-card-modal').classList.remove('active');"><i class="fas fa-times"></i></button>
+      <div id="driver-safety-card-content"></div>
+    </div>
+  </div>
+
+  <!-- ZERO-APP DRIVER MODAL -->
+  <div id="zero-app-modal" class="modal-backdrop">
+    <div class="modal-card" style="max-width:480px;">
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('zero-app-modal').classList.remove('active');"><i class="fas fa-times"></i></button>
+      <div id="zero-app-content"></div>
+    </div>
+  </div>
+
+  <!-- HANDSHAKE SUCCESS MODAL -->
+  <div id="handshake-success-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('handshake-success-modal').classList.remove('active');"><i class="fas fa-times"></i></button>
+      <div id="handshake-success-content"></div>
+    </div>
+  </div>
+
+  <!-- 3-SEC PRICE PROMPT MODAL -->
+  <div id="price-prompt-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('price-prompt-modal').classList.remove('active');"><i class="fas fa-times"></i></button>
+      <h3 style="font-size:16px;font-weight:800;margin-bottom:4px;" id="price-prompt-title">What rate did you agree to pay?</h3>
+      <p style="font-size:12px;color:var(--slate-500);">3-second rate pulse → Protects future travelers on this route.</p>
+      <div class="range-pills-selector" id="price-prompt-pills"></div>
+      <div class="form-group" style="margin-bottom:14px;">
+        <label style="font-size:11px;font-weight:700;color:var(--slate-600);display:block;margin-bottom:4px;">Or type exact amount (₹):</label>
+        <input type="number" id="price-prompt-custom-amount" placeholder="e.g. 230" style="width:100%;padding:10px;border:1px solid var(--slate-300);border-radius:var(--radius-md);font-size:16px;font-family:inherit;">
+      </div>
+      <button type="button" class="btn btn-primary btn-block btn-lg" id="price-prompt-submit-btn">
+        <i class="fas fa-check"></i> Submit 3-Sec Price Pulse
+      </button>
+    </div>
+  </div>
+
+  <!-- PRICE CAMERA OCR RESULT MODAL -->
+  <div id="price-result-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('price-result-modal').classList.remove('active');"><i class="fas fa-times"></i></button>
+      <div id="price-result-content"></div>
+    </div>
+  </div>
+
+  <!-- SOS DOSSIER MODAL -->
+  <div id="sos-evidence-modal" class="modal-backdrop">
+    <div class="modal-card" style="max-width:520px;">
+      <button type="button" class="modal-close-btn" onclick="document.getElementById('sos-evidence-modal').classList.remove('active');"><i class="fas fa-times"></i></button>
+      <div id="sos-dossier-content"></div>
+    </div>
+  </div>
+
+  <!-- SCRIPTS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <script type="module" src="js/app.js"></script>
+
+</body>
+</html>
