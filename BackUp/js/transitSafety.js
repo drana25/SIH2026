@@ -6,6 +6,7 @@
 
 import { store } from "./store.js";
 import { SEED_ROUTES, SEED_DRIVERS } from "../data/seedData.js";
+import { reviewsManager } from "./reviews.js";
 
 export class TransitSafetyManager {
   constructor() {
@@ -233,9 +234,12 @@ export class TransitSafetyManager {
     };
 
     store.recordDigitalFootprint(digitalFootprint).then(() => {
-      if (typeof reviewsManager !== 'undefined') {
+      if (typeof reviewsManager !== 'undefined' && reviewsManager) {
+        const targetGuideId=driver.id || driver.uid || driver.vehicleRegNo;
         reviewsManager.renderGuideLedger(driver.id || driver.uid, "guide-ledger-container");
+      if(document.getElementsById("guide-self-ledger")){
         reviewsManager.renderGuideLedger(driver.id || driver.uid, "guide-self-ledger");
+      }
       }
     });
 
