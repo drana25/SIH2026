@@ -6,8 +6,8 @@
 
 import { store } from "./store.js";
 
-const AUTH_KEY_PASSENGER = "verida_passenger_profile";
-const AUTH_KEY_DRIVER = "verida_driver_profile";
+const AUTH_KEY_PASSENGER = "verida_user_profile"; // Must match the key store.js uses to load
+const AUTH_KEY_DRIVER = "verida_guide_profile"; // Must match the key store.js uses to load
 
 class AuthManager {
   constructor() {
@@ -118,13 +118,20 @@ class AuthManager {
     }
 
     const profile = { name, phone, origin, emergency, createdAt: new Date().toISOString() };
-    localStorage.setItem(AUTH_KEY_PASSENGER, JSON.stringify(profile));
 
-    // Push into store
-    store.activeUser = { ...store.activeUser, name, phone };
+    // Use store.registerPassenger so it persists to the correct localStorage key
+    store.registerPassenger(profile);
 
     this._syncNamesToUI();
     this.closeAuthModal();
+
+    // Re-render profile tab if active
+    setTimeout(() => {
+      if (window.veridaApp) {
+        window.veridaApp.renderProfileTab();
+      }
+    }, 100);
+
     this._showSuccessToast(`✅ Passenger profile saved — Welcome, ${name}!`, "green");
     console.log("[Verida Auth] Passenger profile saved:", profile);
   }
@@ -146,20 +153,26 @@ class AuthManager {
     }
 
     const profile = { name, phone, vehicleRegNo: plate, licenseNo: lic, vehicleType, createdAt: new Date().toISOString() };
-    localStorage.setItem(AUTH_KEY_DRIVER, JSON.stringify(profile));
 
-    // Push into store
-    store.activeGuide = { ...store.activeGuide, name, phone, vehicleRegNo: plate, licenseNo: lic, vehicleType };
+    // Use store.registerDriver so it persists to the correct localStorage key
+    store.registerDriver(profile);
 
     this._syncNamesToUI();
     this.closeAuthModal();
 
-    // Regenerate the QR code with new driver data after UI update
+    // Re-render the QR with updated guide data and sync profile tab
     setTimeout(() => {
       if (window.digitalHandshake) {
-        window.digitalHandshake.regenerateDriverQR();
+        window.digitalHandshake.stopGuideQrRotation();
+        window.digitalHandshake.startGuideQrRotation("guide-qr-canvas", "qr-countdown-badge");
       }
-    }, 100);
+      if (window.veridaApp) {
+        window.veridaApp.renderProfileTab();
+        if (store.currentRole === "guide") {
+          window.reviewsManager?.renderGuideLedger(store.activeGuide.id, "guide-self-ledger");
+        }
+      }
+    }, 150);
 
     this._showSuccessToast(`✅ Driver profile saved — ${name} (${plate})`, "blue");
     console.log("[Verida Auth] Driver profile saved:", profile);

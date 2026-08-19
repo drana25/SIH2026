@@ -12,18 +12,33 @@ export class ReviewsManager {
 
   // --- Render Guide Profile & Ledger ---
   renderGuideLedger(guideId = null, containerId = "guide-ledger-container") {
+    // Check if we are rendering for dual screen or specific container
+    // If no guideId is passed, use activeGuide (usually for Driver view)
+    const isPassenger = store.currentRole === "traveler";
+    const guide = guideId ? store.getGuideById(guideId) : store.activeGuide;
+    
     const container = document.getElementById(containerId);
     if (!container) return;
 
-    const guide = guideId ? store.getGuideById(guideId) : store.activeGuide;
-    if (!guide) {
-      container.innerHTML = `<div class="empty-state"><p>No guide profile found.</p></div>`;
+    if (!guide && !isPassenger) {
+      container.innerHTML = `<div class="empty-state"><p>No profile found.</p></div>`;
       return;
     }
 
-    const reviews = store.getReviewsForGuide(guide.id || guide.uid);
-    const handshakes = store.getHandshakes().filter(h => h.guideId === guide.id || h.guideId === guide.uid);
-    const hasHandshake = store.hasHandshakeWithGuide(guide.id || guide.uid);
+    const reviews = guide ? store.getReviewsForGuide(guide.id || guide.uid) : [];
+    const handshakes = guide ? store.getHandshakes().filter(h => h.guideId === guide.id || h.guideId === guide.uid) : [];
+    const hasHandshake = guide ? store.hasHandshakeWithGuide(guide.id || guide.uid) : false;
+    
+    // Fetch Digital Footprints for chronological ledger
+    let footprints = store.getDigitalFootprints() || [];
+    if (guide && !isPassenger) {
+       footprints = footprints.filter(f => f.vehicleRegNo === guide.vehicleRegNo);
+    } else if (isPassenger) {
+       footprints = footprints.filter(f => f.passengerName === store.activeUser.name);
+    }
+    
+    // Sort chronologically (newest first)
+    footprints.sort((a, b) => new Date(b.timestamp || b.createdAt) - new Date(a.timestamp || a.createdAt));
 
     container.innerHTML = `
       <!-- Guide Verified Header Card -->
@@ -89,50 +104,33 @@ export class ReviewsManager {
       <!-- Tamper-Evident Verified Ledger Timeline -->
       <div class="ledger-timeline-section">
         <div class="ledger-header">
-          <h4 class="section-subtitle"><i class="fas fa-link"></i> Verified Encounters Ledger (${handshakes.length + reviews.length} Records)</h4>
-          <span class="ledger-badge"><i class="fas fa-lock"></i> Immutable GPS Proof</span>
+          <h4 class="section-subtitle"><i class="fas fa-link"></i> Immutable Ledger (${footprints.length} Records)</h4>
+          <span class="ledger-badge"><i class="fas fa-lock"></i> Digital Footprints</span>
         </div>
 
         <div class="timeline-list">
-          ${reviews.map(rev => {
-            const timeFormatted = new Date(rev.timestamp).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+          ${footprints.length === 0 ? '<div class="empty-state" style="padding:16px;text-align:center;">No footprint records found.</div>' : ''}
+          ${footprints.map(f => {
+            const dateObj = new Date(f.timestamp || f.createdAt || Date.now());
+            const dateFormatted = dateObj.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+            const timeFormatted = dateObj.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+            
             return `
               <div class="timeline-item">
                 <div class="timeline-dot verified"></div>
-                <div class="timeline-card">
-                  <div class="timeline-card-header">
-                    <div class="reviewer-meta">
-                      <span class="reviewer-name"><strong>${rev.travelerName || 'Verified Traveler'}</strong></span>
-                      <span class="review-rating">${'★'.repeat(rev.rating)}${'☆'.repeat(5 - rev.rating)}</span>
-                    </div>
-                    <span class="timeline-date">${timeFormatted}</span>
-                  </div>
-                  <div class="presence-watermark">
-                    <i class="fas fa-map-pin"></i> ${rev.monumentName || 'Vadodara Heritage Site'} • <span class="hash-tag">GPS Presence Verified</span>
-                  </div>
-                  <p class="review-text">${rev.comment}</p>
-                </div>
-              </div>
-            `;
-          }).join('')}
-
-          ${handshakes.map(h => {
-            const timeFormatted = new Date(h.timestamp).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
-            return `
-              <div class="timeline-item">
-                <div class="timeline-dot handshake"></div>
                 <div class="timeline-card encounter-card">
                   <div class="timeline-card-header">
-                    <span class="encounter-title"><i class="fas fa-handshake"></i> Verified Encounter #${(h.id || '').slice(-4)}</span>
-                    <span class="timeline-date">${timeFormatted}</span>
+                    <span class="encounter-title"><i class="fas fa-route"></i> Trip: ${f.route || 'Local Route'}</span>
+                    <span class="timeline-date">${dateFormatted} • ${timeFormatted}</span>
                   </div>
-                  <div class="encounter-details">
-                    <span><i class="fas fa-user"></i> ${h.travelerName}</span>
-                    <span><i class="fas fa-map-marker-alt"></i> ${h.monumentName || 'Vadodara'} (Proximity: ${h.distanceMeters || 3}m)</span>
-                    ${h.agreedPrice ? `<span class="agreed-tag">Agreed: ₹${h.agreedPrice}</span>` : ''}
+                  <div class="encounter-details" style="display:flex; flex-direction:column; gap:4px; margin-top:8px;">
+                    <span><i class="fas fa-user"></i> <strong>Passenger:</strong> ${f.passengerName}</span>
+                    <span><i class="fas fa-taxi"></i> <strong>Driver:</strong> ${f.driverName || 'Unknown'} (${f.vehicleRegNo})</span>
+                    <span><i class="fas fa-id-badge"></i> <strong>License:</strong> ${f.rtoLicenseNo || 'N/A'}</span>
+                    <span><i class="fas fa-map-marker-alt"></i> <strong>GPS Anchor:</strong> ${f.pickupGps || 'Unavailable'}</span>
                   </div>
-                  <div class="crypto-hash-row">
-                    <span class="token-hash">Hash: ${h.tokenHash || '0x9a84f2c019d'}</span>
+                  <div class="crypto-hash-row" style="margin-top:10px;">
+                    <span class="token-hash">Footprint ID: ${f.footprintHash}</span>
                   </div>
                 </div>
               </div>
@@ -182,7 +180,8 @@ export class ReviewsManager {
 
         await store.recordReview(newReview);
         alert("✅ Proof-of-Presence Review submitted! It is now permanently linked to your verified encounter.");
-        this.renderGuideLedger(guide.id);
+        this.renderGuideLedger(guide.id, "guide-ledger-container");
+        this.renderGuideLedger(guide.id, "guide-self-ledger");
       };
     }
   }

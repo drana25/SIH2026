@@ -17,34 +17,31 @@ export class HotspotRadar {
     this.searchQuery = "";
   }
 
-  // --- Initialize Leaflet Map ---
+  // --- Initialize Google Map ---
   initMap(containerId = "hotspot-map") {
     const container = document.getElementById(containerId);
-    if (!container || typeof L === "undefined") return;
+    if (!container) return;
+
+    if (typeof google === "undefined" || !google.maps) {
+       console.warn("[Hotspots] Google Maps API not loaded. Map rendering skipped.");
+       container.innerHTML = `<div style="padding:20px;text-align:center;color:#64748b;">Interactive Map is temporarily unavailable.</div>`;
+       this.renderHotspotsDirectory();
+       return;
+    }
 
     const city = store.getCurrentCity();
     const loc = store.currentLocation;
 
-    if (this.map) {
-      this.map.remove();
-      this.map = null;
-    }
-
     try {
-      this.map = L.map(containerId, {
-        center: [loc.lat, loc.lng],
+      this.map = new google.maps.Map(container, {
+        center: { lat: loc.lat, lng: loc.lng },
         zoom: city.zoom || 13,
-        zoomControl: false
+        disableDefaultUI: true,
+        zoomControl: true,
+        styles: [
+          { featureType: "poi", stylers: [{ visibility: "off" }] }
+        ]
       });
-
-      // Add clean, modern tile layer
-      L.tileLayer("https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png", {
-        attribution: '&copy; <a href="https://www.openstreetmap.org/">OpenStreetMap</a> &copy; <a href="https://carto.com/">CARTO</a>',
-        subdomains: "abcd",
-        maxZoom: 19
-      }).addTo(this.map);
-
-      L.control.zoom({ position: "bottomright" }).addTo(this.map);
 
       this.renderMapLayers();
       this.renderHotspotsDirectory();
@@ -56,11 +53,12 @@ export class HotspotRadar {
 
   // Render monuments, hotspots, and user pin
   renderMapLayers() {
-    if (!this.map || typeof L === "undefined") return;
+    if (!this.map || typeof google === "undefined" || !google.maps) return;
 
     // Clear existing layers
-    this.hotspotCircles.forEach(c => c.remove());
-    this.monumentMarkers.forEach(m => m.remove());
+    this.hotspotCircles.forEach(c => c.setMap(null));
+    this.monumentMarkers.forEach(m => m.setMap(null));
+    if (this.userMarker) this.userMarker.setMap(null);
     this.hotspotCircles = [];
     this.monumentMarkers = [];
 
@@ -68,85 +66,83 @@ export class HotspotRadar {
     const hotspots = store.getHotspotsForCity(cityId);
     const monuments = store.getMonumentsForCity(cityId);
     const userLoc = store.currentLocation;
+    
+    const infoWindow = new google.maps.InfoWindow();
 
-    // 1. Hotspot Danger Circles (Red/Amber with pulsing animation)
+    // 1. Hotspot Danger Circles
     hotspots.forEach(spot => {
       const circleColor = spot.riskLevel === "high" ? "#ef4444" : "#f59e0b";
-      const circle = L.circle([spot.lat, spot.lng], {
-        color: circleColor,
+      const circle = new google.maps.Circle({
+        strokeColor: circleColor,
+        strokeOpacity: 0.8,
+        strokeWeight: 2,
         fillColor: circleColor,
         fillOpacity: 0.25,
-        radius: spot.radius || 200,
-        weight: 2,
-        dashArray: "4, 6"
-      }).addTo(this.map);
+        map: this.map,
+        center: { lat: spot.lat, lng: spot.lng },
+        radius: spot.radius || 200
+      });
 
-      circle.bindPopup(`
-        <div class="hotspot-popup" style="max-width: 240px; font-family: inherit;">
-          <h4 style="color: ${circleColor}; margin: 0 0 4px 0; font-size: 13px;">
-            <i class="fas fa-exclamation-triangle"></i> ${spot.name}
-          </h4>
-          <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 700; color: #1e293b;">
-            🚨 ${spot.scamType}
-          </p>
-          <p style="margin: 0 0 6px 0; font-size: 11px; color: #475569; line-height: 1.4;">
-            ${spot.description}
-          </p>
-          <div style="font-size: 11px; color: #047857; background: #ecfdf5; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #059669;">
-            <i class="fas fa-shield-alt"></i> <strong>Safe Action:</strong> ${spot.proactiveAdvice}
+      google.maps.event.addListener(circle, "click", (e) => {
+        infoWindow.setContent(`
+          <div class="hotspot-popup" style="max-width: 240px; font-family: inherit;">
+            <h4 style="color: ${circleColor}; margin: 0 0 4px 0; font-size: 13px;">
+              <i class="fas fa-exclamation-triangle"></i> ${spot.name}
+            </h4>
+            <p style="margin: 0 0 6px 0; font-size: 11px; font-weight: 700; color: #1e293b;">
+              🚨 ${spot.scamType}
+            </p>
+            <p style="margin: 0 0 6px 0; font-size: 11px; color: #475569; line-height: 1.4;">
+              ${spot.description}
+            </p>
+            <div style="font-size: 11px; color: #047857; background: #ecfdf5; padding: 4px 8px; border-radius: 4px; border-left: 3px solid #059669;">
+              <i class="fas fa-shield-alt"></i> <strong>Safe Action:</strong> ${spot.proactiveAdvice}
+            </div>
           </div>
-        </div>
-      `);
+        `);
+        infoWindow.setPosition(e.latLng);
+        infoWindow.open(this.map);
+      });
 
       this.hotspotCircles.push(circle);
     });
 
     // 2. Verified Monument Markers
     monuments.forEach(mon => {
-      const iconHtml = `
-        <div class="monument-map-pin" title="${mon.name}">
-          <i class="fas fa-landmark"></i>
-        </div>
-      `;
-      const customIcon = L.divIcon({
-        html: iconHtml,
-        className: "custom-monument-icon",
-        iconSize: [28, 28],
-        iconAnchor: [14, 14]
+      const marker = new google.maps.Marker({
+        position: { lat: mon.lat, lng: mon.lng },
+        map: this.map,
+        title: mon.name
       });
-
-      const marker = L.marker([mon.lat, mon.lng], { icon: customIcon }).addTo(this.map);
-      marker.bindPopup(`
-        <div class="monument-popup" style="max-width: 240px; font-family: inherit;">
-          <h4 style="margin: 0 0 4px 0; color: #0f172a; font-size: 13px;">${mon.name}</h4>
-          <span style="font-size: 10px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${mon.category}</span>
-          <p style="margin: 6px 0; font-size: 11px; color: #475569; line-height: 1.4;">${mon.highlights}</p>
-        </div>
-      `);
+      
+      marker.addListener("click", () => {
+        infoWindow.setContent(`
+          <div class="monument-popup" style="max-width: 240px; font-family: inherit;">
+            <h4 style="margin: 0 0 4px 0; color: #0f172a; font-size: 13px;">${mon.name}</h4>
+            <span style="font-size: 10px; background: #e0f2fe; color: #0369a1; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${mon.category}</span>
+            <p style="margin: 6px 0; font-size: 11px; color: #475569; line-height: 1.4;">${mon.highlights}</p>
+          </div>
+        `);
+        infoWindow.open(this.map, marker);
+      });
 
       this.monumentMarkers.push(marker);
     });
 
     // 3. User Location Marker
-    const userPinHtml = `
-      <div class="user-live-gps-pin">
-        <div class="user-pin-pulse"></div>
-        <div class="user-pin-core"></div>
-      </div>
-    `;
-    const userIcon = L.divIcon({
-      html: userPinHtml,
-      className: "custom-user-icon",
-      iconSize: [24, 24],
-      iconAnchor: [12, 12]
+    this.userMarker = new google.maps.Marker({
+      position: { lat: userLoc.lat, lng: userLoc.lng },
+      map: this.map,
+      title: "Your Live GPS Pin",
+      icon: {
+        path: google.maps.SymbolPath.CIRCLE,
+        scale: 8,
+        fillColor: "#3b82f6",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 2,
+      }
     });
-
-    if (this.userMarker) {
-      this.userMarker.setLatLng([userLoc.lat, userLoc.lng]);
-    } else {
-      this.userMarker = L.marker([userLoc.lat, userLoc.lng], { icon: userIcon }).addTo(this.map);
-      this.userMarker.bindPopup(`<strong>Your Live GPS Pin</strong><br>${userLoc.name}`);
-    }
   }
 
   // --- Render Complete Interactive Hotspots & Landmarks Directory ---
@@ -158,6 +154,21 @@ export class HotspotRadar {
     const hotspots = store.getHotspotsForCity(cityId);
     const monuments = store.getMonumentsForCity(cityId);
 
+    const userLoc = store.currentLocation;
+    const calculateDistance = (lat1, lng1, lat2, lng2) => {
+      if (typeof google !== 'undefined' && google.maps && google.maps.geometry) {
+        const p1 = new google.maps.LatLng(lat1, lng1);
+        const p2 = new google.maps.LatLng(lat2, lng2);
+        return google.maps.geometry.spherical.computeDistanceBetween(p1, p2) / 1000;
+      }
+      // Haversine fallback
+      const R = 6371;
+      const dLat = (lat2 - lat1) * Math.PI / 180;
+      const dLng = (lng2 - lng1) * Math.PI / 180;
+      const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng/2) * Math.sin(dLng/2);
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    };
+
     // Combine hotspots and monuments into a rich unified list
     const unifiedList = [
       ...hotspots.map(h => ({
@@ -165,14 +176,16 @@ export class HotspotRadar {
         isHotspot: true,
         typeLabel: "🚨 Scam / Tout Hotspot",
         badgeClass: h.riskLevel === "high" ? "badge-danger" : "badge-warning",
-        category: "Scam Hotspot"
+        category: "Scam Hotspot",
+        distKm: calculateDistance(userLoc.lat, userLoc.lng, h.lat, h.lng)
       })),
       ...monuments.map(m => ({
         ...m,
         isHotspot: false,
         typeLabel: `🏛️ ${m.category}`,
         badgeClass: "badge-success",
-        category: m.category
+        category: m.category,
+        distKm: calculateDistance(userLoc.lat, userLoc.lng, m.lat, m.lng)
       }))
     ];
 
@@ -195,6 +208,8 @@ export class HotspotRadar {
         (item.description || "").toLowerCase().includes(q)
       );
     }
+    
+    filtered.sort((a, b) => a.distKm - b.distKm);
 
     if (filtered.length === 0) {
       container.innerHTML = `
@@ -213,7 +228,7 @@ export class HotspotRadar {
               <span class="hotspot-type-tag ${item.riskLevel === 'high' ? 'high-risk' : 'med-risk'}">
                 <i class="fas fa-shield-virus"></i> ${item.riskLevel === 'high' ? 'HIGH RISK SCAM ZONE' : 'TOUT ALERT ZONE'}
               </span>
-              <span class="report-count-tag"><i class="fas fa-flag"></i> ${item.recentReportCount || 12} Reports</span>
+              <span class="report-count-tag" style="background:#f1f5f9; color:#475569;"><i class="fas fa-location-arrow"></i> ${item.distKm.toFixed(1)} km away</span>
             </div>
             <h4 class="hotspot-card-title">${item.name}</h4>
             <div class="scam-issue-row">
@@ -237,7 +252,7 @@ export class HotspotRadar {
               <span class="hotspot-type-tag verified-zone">
                 <i class="fas fa-landmark"></i> ${item.category}
               </span>
-              <span class="verified-safe-tag"><i class="fas fa-check-circle"></i> ASI / Gujarat Verified</span>
+              <span class="verified-safe-tag" style="background:#f1f5f9; color:#475569;"><i class="fas fa-location-arrow"></i> ${item.distKm.toFixed(1)} km away</span>
             </div>
             <h4 class="hotspot-card-title">${item.name}</h4>
             <p class="hotspot-card-desc">${item.highlights}</p>
@@ -263,8 +278,9 @@ export class HotspotRadar {
     const locPill = document.getElementById("current-location-pill");
     if (locPill) locPill.innerHTML = `<span class="gps-live-dot"></span> ${name}`;
 
-    if (this.map) {
-      this.map.flyTo([lat, lng], 16, { animate: true, duration: 1.0 });
+    if (this.map && typeof google !== "undefined") {
+      this.map.panTo({ lat, lng });
+      this.map.setZoom(16);
       this.renderMapLayers();
     }
 
@@ -292,14 +308,14 @@ export class HotspotRadar {
 
     this.activeAlertHotspot = nearbyHotspot;
 
-    if (alertBanner) {
+   /* if (alertBanner) {
       if (nearbyHotspot) {
         alertBanner.classList.remove("hidden");
         alertBanner.innerHTML = `
           <div class="alert-content">
             <div class="alert-icon-box pulse-warning"><i class="fas fa-shield-virus"></i></div>
             <div class="alert-text">
-              <div class="alert-title">⚠️ Approaching Scam Hotspot: ${nearbyHotspot.name} (${minDistance}m away)</div>
+             <div class="alert-title">⚠️ Approaching Scam Hotspot: ${nearbyHotspot.name} (${minDistance}m away)</div>
               <div class="alert-desc">${nearbyHotspot.scamType}. ${nearbyHotspot.proactiveAdvice}</div>
             </div>
             <button class="alert-dismiss-btn" onclick="document.getElementById('hotspot-proactive-banner').classList.add('hidden')">
@@ -310,7 +326,7 @@ export class HotspotRadar {
       } else {
         alertBanner.classList.add("hidden");
       }
-    }
+    }*/
   }
 
   // Teleport user to a specific coordinate
@@ -320,3 +336,5 @@ export class HotspotRadar {
 }
 
 export const hotspotRadar = new HotspotRadar();
+
+

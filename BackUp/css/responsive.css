@@ -5,13 +5,20 @@
 /* ==========================================================================
    LAPTOP / DESKTOP RESPONSIVENESS (>= 768px)
    ========================================================================== */
+/* On narrow screens: always show the bottom nav */
+@media (max-width: 767px) {
+  .app-bottom-nav {
+    display: flex !important;
+  }
+}
+
 @media (min-width: 768px) {
   /* Show Desktop Top Nav Link Bar */
   .desktop-nav-bar {
     display: flex !important;
   }
 
-  /* Hide Mobile Bottom Nav on wide screens */
+  /* Hide Mobile Bottom Nav on wide screens — unless in mobile mockup mode */
   body:not(.mobile-mockup-mode) .app-bottom-nav {
     display: none !important;
   }
@@ -189,4 +196,16 @@ body.dual-screen-mode .app-viewport-wrapper {
   .dossier-actions, .stage-control-bar, .app-bottom-nav, .desktop-nav-bar {
     display: none !important;
   }
+}
+
+/* ==========================================================================
+   ROLE-BASED NAV VISIBILITY (must come AFTER media queries to win)
+   ========================================================================== */
+body.role-guide .traveler-only {
+  display: none !important;
+  pointer-events: none;
+}
+body:not(.role-guide) .guide-only {
+  display: none !important;
+  pointer-events: none;
 }

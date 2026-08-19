@@ -4,8 +4,6 @@
 
 import { store } from "./store.js";
 import { digitalHandshake } from "./handshake.js";
-import { pricePulse } from "./pricePulse.js";
-import { priceCamera } from "./priceCamera.js";
 import { hotspotRadar } from "./hotspots.js";
 import { reviewsManager } from "./reviews.js";
 import { evidencePacketManager } from "./evidencePacket.js";
@@ -24,30 +22,39 @@ class App {
     this.isInitialized = true;
     console.log("[Verida] Initializing On-The-Spot Tourism & Transit Trust Platform...");
 
+    // Step 1: Populate city dropdown (safe, no side-effects)
+    try { this.populateCityDropdown(); } catch (e) { console.warn("[Verida] City dropdown error:", e); }
+
+    // Step 2: Bind all event listeners
+    try { this.bindEvents(); } catch (e) { console.warn("[Verida] Event binding error:", e); }
+
+    // Step 3: Load auth manager (reads localStorage, binds forms)
+    try { authManager.init(); } catch (e) { console.warn("[Verida] Auth init error:", e); }
+
+    // Step 4: Sync profile names to UI
+    try { this.syncProfileDisplayNames(); } catch (e) { console.warn("[Verida] Profile sync error:", e); }
+
+    // Step 5: Switch role (sets body class, shows correct nav items)
+    try { this.switchRole(store.currentRole); } catch (e) { console.warn("[Verida] Role switch error:", e); }
+
+    // Step 6: Switch to the default tab — this also calls initRoutePlanner()
+    // Do this LAST so all DOM is ready and role class is applied
     try {
-      this.populateCityDropdown();
-      this.bindEvents();
-      authManager.init();
-      this.syncProfileDisplayNames();
-      this.switchRole(store.currentRole);
       this.switchTab("transit");
-
-      // Initialize modules safely
-      transitSafety.initRoutePlanner();
-      pricePulse.renderTicker();
-      reviewsManager.renderGuideLedger();
-
-      // Initialize map safely with slight delay
-      setTimeout(() => {
-        try {
-          hotspotRadar.initMap();
-        } catch (e) {
-          console.warn("[Verida Map Init Warning]:", e);
-        }
-      }, 200);
-    } catch (err) {
-      console.error("[Verida Init Error]:", err);
+    } catch (e) {
+      console.warn("[Verida] Initial tab switch error:", e);
+      // Fallback: manually show the transit panel
+      const transitPanel = document.getElementById("tab-transit");
+      if (transitPanel) transitPanel.classList.add("active");
     }
+
+    // Step 7: Pre-render the ledger so it's ready when user navigates there
+    try { reviewsManager.renderGuideLedger(); } catch (e) { console.warn("[Verida] Ledger render error:", e); }
+
+    // Step 8: Initialize map with delay (non-critical, deferred)
+    setTimeout(() => {
+      try { hotspotRadar.initMap(); } catch (e) { console.warn("[Verida] Map init error:", e); }
+    }, 300);
   }
 
   syncProfileDisplayNames() {
@@ -155,6 +162,7 @@ class App {
         e.preventDefault();
         document.getElementById("camera-scanner-wrapper")?.classList.remove("hidden");
         digitalHandshake.startTravelerScanner("qr-reader", (record) => {
+          // record is already saved to store by processScannedPayload internally
           this.onHandshakeSuccess(record);
           digitalHandshake.stopTravelerScanner();
           document.getElementById("camera-scanner-wrapper")?.classList.add("hidden");
@@ -171,34 +179,6 @@ class App {
       };
     }
 
-    // Price Camera Trigger
-    const snapPhotoBtn = document.getElementById("price-camera-snap-btn");
-    if (snapPhotoBtn) {
-      snapPhotoBtn.onclick = async (e) => {
-        e.preventDefault();
-        const statusEl = document.getElementById("ocr-status-indicator");
-        const photoData = priceCamera.captureCurrentFrame();
-        if (photoData) {
-          if (statusEl) statusEl.textContent = "Processing camera image...";
-          await priceCamera.processImage(photoData, (msg) => {
-            if (statusEl) statusEl.textContent = msg;
-          });
-          demoSimulator.loadSampleChit("sample-chit-vad-overcharge");
-        } else {
-          demoSimulator.loadSampleChit("sample-chit-vad-overcharge");
-        }
-      };
-    }
-
-    // Sample Chits Quick Selector
-    document.querySelectorAll(".sample-chit-btn").forEach(btn => {
-      btn.onclick = (e) => {
-        e.preventDefault();
-        const chitId = btn.getAttribute("data-chit");
-        demoSimulator.loadSampleChit(chitId);
-      };
-    });
-
     // SOS Emergency Button
     const sosBtn = document.getElementById("emergency-sos-floating-btn");
     if (sosBtn) {
@@ -207,17 +187,6 @@ class App {
         this.triggerSosFlow();
       };
     }
-
-    // Price Pulse Filter Pills
-    document.querySelectorAll(".pulse-filter-pill").forEach(pill => {
-      pill.onclick = (e) => {
-        e.preventDefault();
-        document.querySelectorAll(".pulse-filter-pill").forEach(p => p.classList.remove("active"));
-        pill.classList.add("active");
-        pricePulse.activeFilter = pill.getAttribute("data-category");
-        pricePulse.renderTicker();
-      };
-    });
 
     // Hotspot Directory Search Input
     const hotspotSearchInput = document.getElementById("hotspot-search-input");
@@ -258,7 +227,6 @@ class App {
     if (locPill) locPill.innerHTML = `<span class="gps-live-dot"></span> ${store.currentLocation.name}`;
 
     transitSafety.initRoutePlanner();
-    pricePulse.renderTicker();
     reviewsManager.renderGuideLedger();
     hotspotRadar.renderMapLayers();
     hotspotRadar.renderHotspotsDirectory();
@@ -276,18 +244,15 @@ class App {
       b.classList.toggle("active", b.getAttribute("data-role") === role);
     });
 
-    const travelerContainer = document.getElementById("traveler-view-container");
-    const guideContainer = document.getElementById("guide-view-container");
+    document.body.classList.toggle("role-guide", role === "guide");
 
     if (role === "guide") {
-      if (travelerContainer) travelerContainer.classList.add("hidden");
-      if (guideContainer) guideContainer.classList.remove("hidden");
-      digitalHandshake.startGuideQrRotation("guide-qr-canvas", "qr-countdown-badge");
-      reviewsManager.renderGuideLedger(store.activeGuide.id, "guide-self-ledger");
+      try { digitalHandshake.startGuideQrRotation("guide-qr-canvas", "qr-countdown-badge"); } catch (e) { console.warn("[Verida] QR rotation error:", e); }
+      try { reviewsManager.renderGuideLedger(store.activeGuide.id || store.activeGuide.uid, "guide-self-ledger"); } catch (e) { console.warn("[Verida] Guide ledger error:", e); }
+      this.switchTab("guide-qr");
     } else {
-      if (travelerContainer) travelerContainer.classList.remove("hidden");
-      if (guideContainer) guideContainer.classList.add("hidden");
-      digitalHandshake.stopGuideQrRotation();
+      try { digitalHandshake.stopGuideQrRotation(); } catch (e) {}
+      this.switchTab("transit");
     }
   }
 
@@ -317,23 +282,58 @@ class App {
           console.warn("[Verida Map Invalidate Warning]:", e);
         }
       }, 150);
-    } else if (tabKey === "camera") {
-      priceCamera.startCamera();
-    } else {
-      priceCamera.stopCamera();
     }
 
     if (tabKey === "transit") {
-      transitSafety.initRoutePlanner();
-    } else if (tabKey === "pulses") {
-      pricePulse.renderTicker();
+      try { transitSafety.initRoutePlanner(); } catch (e) { console.warn("[Verida] Transit planner error:", e); }
+    } else if (tabKey === "guide-qr") {
+      setTimeout(() => {
+        try { digitalHandshake.startGuideQrRotation("guide-qr-canvas", "qr-countdown-badge"); } catch (e) { console.warn("[Verida] QR rotation error:", e); }
+        try { reviewsManager.renderGuideLedger(store.activeGuide.id || store.activeGuide.uid, "guide-self-ledger"); } catch (e) { console.warn("[Verida] Guide-self ledger error:", e); }
+      }, 80);
     } else if (tabKey === "ledger") {
-      reviewsManager.renderGuideLedger();
+      try {
+        if (store.currentRole === "guide") {
+          reviewsManager.renderGuideLedger(store.activeGuide.id || store.activeGuide.uid, "guide-ledger-container");
+        } else {
+          reviewsManager.renderGuideLedger();
+        }
+      } catch (e) { console.warn("[Verida] Ledger render error:", e); }
+    } else if (tabKey === "profile") {
+      try { this.renderProfileTab(); } catch (e) { console.warn("[Verida] Profile render error:", e); }
     }
+  }
+
+  renderProfileTab() {
+    const container = document.getElementById("profile-container");
+    if (!container) return;
+    const isGuide = store.currentRole === "guide";
+    const profile = isGuide ? store.activeGuide : store.activeUser;
+    
+    container.innerHTML = `
+      <div style="padding: 20px; background: white; border-radius: 12px; border: 1px solid #e2e8f0;">
+        <h3 style="font-weight: 800; font-size: 18px; margin-bottom: 12px;"><i class="fas fa-user-circle"></i> ${isGuide ? 'Driver / Guide Profile' : 'Passenger Profile'}</h3>
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          <div><strong>Name:</strong> ${profile.name}</div>
+          <div><strong>Phone:</strong> ${profile.phone}</div>
+          ${isGuide ? `
+            <div><strong>Vehicle No:</strong> ${profile.vehicleRegNo}</div>
+            <div><strong>License:</strong> ${profile.licenseNo || profile.rtoLicenseNo}</div>
+          ` : `
+            <div><strong>Origin:</strong> ${profile.origin}</div>
+            <div><strong>Emergency Contact:</strong> ${profile.emergencyContact}</div>
+          `}
+        </div>
+        <button type="button" class="btn btn-outline btn-block" style="margin-top: 16px;" onclick="authManager.openAuthModal('${store.currentRole}')">
+          <i class="fas fa-user-edit"></i> Edit Profile Information
+        </button>
+      </div>
+    `;
   }
 
   // --- Handshake Execution Flow ---
   async executeHandshakeFlow() {
+    // processScannedPayload inside simulateLiveHandshake already calls store.recordHandshake
     const record = await digitalHandshake.simulateLiveHandshake();
     if (record) {
       this.onHandshakeSuccess(record);
@@ -384,23 +384,21 @@ class App {
             <i class="fas fa-link"></i> Immutable Ledger Hash: <code>${record.tokenHash}</code>
           </div>
 
-          <button type="button" class="btn btn-primary btn-block btn-lg" id="proceed-to-price-pulse-btn">
-            <i class="fas fa-arrow-right"></i> Agree on Price (3-Sec Live Pulse)
+          <button type="button" class="btn btn-primary btn-block btn-lg" id="proceed-to-review-btn">
+            <i class="fas fa-arrow-right"></i> Leave a Proof-of-Presence Review
           </button>
         </div>
       `;
 
       modal.classList.add("active");
 
-      const proceedBtn = document.getElementById("proceed-to-price-pulse-btn");
+      const proceedBtn = document.getElementById("proceed-to-review-btn");
       if (proceedBtn) {
         proceedBtn.onclick = (e) => {
           e.preventDefault();
           modal.classList.remove("active");
-          pricePulse.showPostHandshakePrompt(record, () => {
-            reviewsManager.renderGuideLedger();
-            this.switchTab("pulses");
-          });
+          reviewsManager.renderGuideLedger();
+          this.switchTab("ledger");
         };
       }
     }
@@ -423,8 +421,6 @@ class App {
 window.veridaApp = new App();
 window.digitalHandshake = digitalHandshake;
 window.demoSimulator = demoSimulator;
-window.pricePulse = pricePulse;
-window.priceCamera = priceCamera;
 window.hotspotRadar = hotspotRadar;
 window.reviewsManager = reviewsManager;
 window.evidencePacketManager = evidencePacketManager;

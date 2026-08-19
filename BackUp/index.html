@@ -10,8 +10,6 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.2/css/all.min.css">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
-
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/components.css">
   <link rel="stylesheet" href="css/responsive.css">
@@ -88,29 +86,24 @@
     <!-- Desktop Nav -->
     <nav class="desktop-nav-bar" aria-label="Desktop Navigation">
       <button type="button" class="desktop-nav-link active" data-tab="transit"><i class="fas fa-route"></i> Transit & Routes</button>
-      <button type="button" class="desktop-nav-link" data-tab="handshake"><i class="fas fa-handshake"></i> Handshake</button>
-      <button type="button" class="desktop-nav-link" data-tab="radar"><i class="fas fa-map-location-dot"></i> Hotspot Radar</button>
-      <button type="button" class="desktop-nav-link" data-tab="camera"><i class="fas fa-camera"></i> Price Camera</button>
-      <button type="button" class="desktop-nav-link" data-tab="pulses"><i class="fas fa-chart-line"></i> Live Pulse</button>
+      <button type="button" class="desktop-nav-link traveler-only" data-tab="handshake"><i class="fas fa-handshake"></i> Handshake</button>
+      <button type="button" class="desktop-nav-link traveler-only" data-tab="radar"><i class="fas fa-map-location-dot"></i> Hotspot Radar</button>
+      <button type="button" class="desktop-nav-link guide-only" data-tab="guide-qr"><i class="fas fa-qrcode"></i> Driver QR</button>
       <button type="button" class="desktop-nav-link" data-tab="ledger"><i class="fas fa-book-bookmark"></i> Ledger</button>
+      <button type="button" class="desktop-nav-link" data-tab="profile"><i class="fas fa-user-circle"></i> Profile</button>
     </nav>
 
     <!-- Proactive Scam Banner -->
     <div id="hotspot-proactive-banner" class="proactive-alert-banner hidden"></div>
 
-    <!-- Ticker Strip -->
-    <div class="pulse-ticker-container" id="price-ticker-strip">
-      <span class="pulse-ticker-label"><i class="fas fa-bolt"></i> LIVE PULSE</span>
-      <div class="pulse-ticker-feed" id="price-pulse-ticker"></div>
-    </div>
+    <!-- Ticker Strip Removed -->
 
     <!-- Live Trip HUD (floats during active trip) -->
     <div id="live-trip-tracker-hud" class="live-trip-hud hidden"></div>
 
     <main class="app-content-scroll">
 
-      <!-- === TRAVELER / PASSENGER VIEW === -->
-      <div id="traveler-view-container">
+      <!-- === APP TABS === -->
 
         <!-- TAB 0: Transit Safety (DEFAULT) -->
         <section id="tab-transit" class="tab-content-panel active">
@@ -124,10 +117,13 @@
             <h2>Digital Handshake</h2>
             <p class="hero-subtitle">Verify any rickshaw driver, guide, or stranger in 5 seconds using a GPS-locked rotating QR code. Works even when they have no app.</p>
             <div class="hero-action-box">
-              <button type="button" class="btn btn-primary btn-block btn-lg" id="simulate-scan-btn">
-                <i class="fas fa-qrcode"></i> Execute Instant Handshake (Demo)
+              <button type="button" class="btn btn-primary btn-block btn-lg" id="scan-driver-qr-btn">
+                <i class="fas fa-qrcode"></i> Scan Driver QR
               </button>
-              <button type="button" class="btn btn-outline btn-block" id="start-camera-scan-btn">
+              <button type="button" class="btn btn-outline btn-block" id="zero-app-driver-btn">
+                <i class="fas fa-car-on"></i> Driver Has No App? (Plate Scanner)
+              </button>
+              <button type="button" class="btn btn-outline btn-block" id="start-camera-scan-btn" style="margin-top: 8px;">
                 <i class="fas fa-camera"></i> Open Camera QR Scanner
               </button>
             </div>
@@ -183,54 +179,9 @@
           </div>
         </section>
 
-        <!-- TAB 3: Price Camera -->
-        <section id="tab-camera" class="tab-content-panel">
-          <div class="section-heading-row">
-            <h3 style="font-size:16px;font-weight:800;">Point-and-Check Price Camera</h3>
-            <span style="font-size:12px;color:var(--slate-500);">Snap any price slip → Red / Yellow / Green verdict</span>
-          </div>
-          <div class="tab-split-grid">
-            <div>
-              <div class="price-camera-viewport">
-                <video id="camera-stream-video" class="price-camera-video" playsinline muted autoplay></video>
-                <div class="camera-hud-overlay">
-                  <div class="camera-hud-top"><span><i class="fas fa-camera"></i> Tesseract OCR</span><span id="ocr-status-indicator">Ready to scan</span></div>
-                  <div class="hud-target-frame"><div class="hud-scan-line"></div></div>
-                  <div class="camera-hud-bottom">Center the price chit inside frame</div>
-                </div>
-              </div>
-              <button type="button" class="btn btn-primary btn-block btn-lg" id="price-camera-snap-btn" style="margin-top:12px;">
-                <i class="fas fa-camera-retro"></i> Snap & Check Price
-              </button>
-            </div>
-            <div class="sample-chits-carousel">
-              <h4 style="font-size:13px;font-weight:700;color:var(--slate-700);margin-bottom:8px;"><i class="fas fa-bolt" style="color:#f59e0b;"></i> Quick Test Chits:</h4>
-              <div class="sample-chits-grid">
-                <button type="button" class="sample-chit-btn" data-chit="sample-chit-vad-overcharge"><strong style="color:#dc2626;">🚨 Scam:</strong> Vadodara Auto ₹450 (Fair: ₹100)</button>
-                <button type="button" class="sample-chit-btn" data-chit="sample-chit-vad-fair"><strong style="color:#059669;">✅ Fair:</strong> Palace Guide ₹450 (Standard)</button>
-                <button type="button" class="sample-chit-btn" data-chit="sample-chit-agr-overcharge"><strong style="color:#dc2626;">🚨 Scam:</strong> Taj Mahal Fake VIP ₹2,500</button>
-                <button type="button" class="sample-chit-btn" data-chit="sample-chit-del-rickshaw"><strong style="color:#d97706;">🟡 High:</strong> Red Fort Rickshaw ₹150</button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <!-- TAB 4: Live Price Pulse -->
-        <section id="tab-pulses" class="tab-content-panel">
-          <div class="section-heading-row" style="display:flex;justify-content:space-between;align-items:center;">
-            <div>
-              <h3 style="font-size:16px;font-weight:800;">Live Price Pulse</h3>
-              <span style="font-size:12px;color:var(--slate-500);">Real rates paid by recent verified travelers</span>
-            </div>
-          </div>
-          <div class="pulse-filter-bar">
-            <button type="button" class="pulse-filter-pill active" data-category="all">All Services</button>
-            <button type="button" class="pulse-filter-pill" data-category="Auto-Rickshaw">Auto-Rickshaw</button>
-            <button type="button" class="pulse-filter-pill" data-category="Official Guide">Official Guide</button>
-            <button type="button" class="pulse-filter-pill" data-category="Taxi">Local Taxi</button>
-            <button type="button" class="pulse-filter-pill" data-category="Food">Food</button>
-          </div>
-          <div class="price-pulse-feed" id="price-pulse-feed"></div>
+        <!-- Profile Tab -->
+        <section id="tab-profile" class="tab-content-panel">
+          <div id="profile-container"></div>
         </section>
 
         <!-- TAB 5: Ledger -->
@@ -238,10 +189,8 @@
           <div id="guide-ledger-container"></div>
         </section>
 
-      </div>
-
-      <!-- === GUIDE / DRIVER VIEW === -->
-      <div id="guide-view-container" class="hidden">
+      <!-- TAB 6: Driver QR (Guide Only) -->
+      <section id="tab-guide-qr" class="tab-content-panel">
 
         <!-- Driver live notification toast (appears when passenger submits price pulse) -->
         <div id="driver-live-notification-toast" class="driver-notification-toast hidden"></div>
@@ -268,7 +217,7 @@
           <h4 style="font-size:14px;font-weight:800;margin-bottom:10px;"><i class="fas fa-list-check"></i> My Passenger Encounter Ledger</h4>
           <div id="guide-self-ledger" class="timeline-list"></div>
         </div>
-      </div>
+      </section>
 
     </main>
 
@@ -280,11 +229,11 @@
     <!-- Mobile Bottom Nav -->
     <nav class="app-bottom-nav">
       <button type="button" class="nav-tab-btn active" data-tab="transit"><i class="fas fa-route"></i><span>Transit</span></button>
-      <button type="button" class="nav-tab-btn" data-tab="handshake"><i class="fas fa-handshake"></i><span>Verify</span></button>
-      <button type="button" class="nav-tab-btn" data-tab="radar"><i class="fas fa-map-location-dot"></i><span>Hotspots</span></button>
-      <button type="button" class="nav-tab-btn" data-tab="camera"><i class="fas fa-camera"></i><span>Price Cam</span></button>
-      <button type="button" class="nav-tab-btn" data-tab="pulses"><i class="fas fa-chart-line"></i><span>Pulse</span></button>
+      <button type="button" class="nav-tab-btn traveler-only" data-tab="handshake"><i class="fas fa-handshake"></i><span>Verify</span></button>
+      <button type="button" class="nav-tab-btn traveler-only" data-tab="radar"><i class="fas fa-map-location-dot"></i><span>Hotspots</span></button>
+      <button type="button" class="nav-tab-btn guide-only" data-tab="guide-qr"><i class="fas fa-qrcode"></i><span>QR Tap</span></button>
       <button type="button" class="nav-tab-btn" data-tab="ledger"><i class="fas fa-book-bookmark"></i><span>Ledger</span></button>
+      <button type="button" class="nav-tab-btn" data-tab="profile"><i class="fas fa-user-circle"></i><span>Profile</span></button>
     </nav>
   </div>
 
@@ -547,7 +496,7 @@
   </div>
 
   <!-- SCRIPTS -->
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script async defer src="https://maps.googleapis.com/maps/api/js?key=AIzaSyDLIyjwbbLyOrGksgWO8KEZrB4rq6aQMds&libraries=places,geometry"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
   <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>

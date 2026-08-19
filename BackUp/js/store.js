@@ -80,11 +80,12 @@ class Store {
   }
 
   registerDriver(profile) {
+    const existingId = this.activeGuide.id || this.activeGuide.uid || `driver_${Date.now()}`;
     this.activeGuide = {
       ...this.activeGuide,
       ...profile,
-      uid: `driver_${Date.now()}`,
-      id: `driver_${Date.now()}`
+      uid: existingId,
+      id: existingId
     };
     localStorage.setItem("verida_guide_profile", JSON.stringify(this.activeGuide));
     return this.activeGuide;
