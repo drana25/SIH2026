@@ -616,3 +616,21 @@ body {
   from { transform: scale(0.92); opacity: 0; }
   to { transform: scale(1); opacity: 1; }
 }
+
+/* Role-based Visibility — hide nav items per role */
+/* Using max-width/overflow/opacity avoids fighting the media query display:flex !important */
+body.role-guide .traveler-only {
+  display: none !important;
+}
+body:not(.role-guide) .guide-only {
+  display: none !important;
+}
+
+/* Ensure tab panels render their content correctly */
+.tab-content-panel {
+  min-height: 0;
+}
+
+.tab-content-panel.active {
+  min-height: 100px;
+}

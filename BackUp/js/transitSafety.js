@@ -6,6 +6,7 @@
 
 import { store } from "./store.js";
 import { SEED_ROUTES, SEED_DRIVERS } from "../data/seedData.js";
+import { reviewsManager } from "./reviews.js";
 
 export class TransitSafetyManager {
   constructor() {
@@ -21,6 +22,11 @@ export class TransitSafetyManager {
   initRoutePlanner(containerId = "route-planner-container") {
     const container = document.getElementById(containerId);
     if (!container) return;
+
+    if (store.currentRole === "guide") {
+      this.renderDriverTransitHistory(container);
+      return;
+    }
 
     const routes = store.getRoutesForCity(store.currentCityId);
     this.activeRoute = routes[0] || SEED_ROUTES[0];
@@ -69,16 +75,6 @@ export class TransitSafetyManager {
           <!-- Rendered dynamically -->
         </div>
 
-        <!-- Two-Way Digital Footprint & Verification Actions -->
-        <div class="transit-action-grid">
-          <button type="button" class="btn btn-primary btn-block btn-lg" id="scan-driver-qr-btn">
-            <i class="fas fa-qrcode"></i> Scan Driver QR (Create Digital Footprint)
-          </button>
-          
-          <button type="button" class="btn btn-outline btn-block" id="zero-app-driver-btn">
-            <i class="fas fa-car-on"></i> Driver Has No App? (Plate Scanner / Self-Anchor)
-          </button>
-        </div>
       </div>
     `;
 
@@ -165,6 +161,53 @@ export class TransitSafetyManager {
     `;
   }
 
+  // --- Render Driver Transit History ---
+  renderDriverTransitHistory(container) {
+    const footprints = store.getDigitalFootprints().filter(f => f.vehicleRegNo === store.activeGuide.vehicleRegNo);
+    footprints.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+
+    const footprintRows = footprints.map((item, idx) => {
+      // Find benchmark fare for this route
+      const allRoutes = store.getRoutesForCity(store.currentCityId) || [];
+      const rInfo = allRoutes.find(r => `${r.fromName} ➔ ${r.toName}` === item.route) || allRoutes[0];
+      const medianFare = rInfo?.fairRange?.median || 150;
+      const distance = rInfo?.distanceKm || 5.0;
+
+      return `
+        <div class="last3-item animate-fade-in" style="animation-delay: ${idx * 0.08}s">
+          <div class="last3-left">
+            <span class="passenger-avatar-icon" style="background:var(--primary-light); color:var(--primary);"><i class="fas fa-user-check"></i></span>
+            <div class="passenger-meta">
+              <span class="p-name"><strong>${item.passengerName}</strong></span>
+              <span class="p-vehicle"><i class="fas fa-route"></i> ${item.route} (${distance} km)</span>
+              <span class="p-time" style="font-size:11px;color:var(--slate-500);"><i class="fas fa-clock"></i> ${item.formattedTime}</span>
+            </div>
+          </div>
+          <div class="last3-right">
+            <span class="p-amount" style="font-size:14px;">Est. ₹${medianFare}</span>
+            <span class="p-time">Verified</span>
+          </div>
+        </div>
+      `;
+    }).join("");
+
+    container.innerHTML = `
+      <div class="transit-planner-card">
+        <div class="transit-header-row">
+          <div class="transit-title-block">
+            <h3><i class="fas fa-list-check"></i> My Transit History</h3>
+            <p>Verified passenger trips and anchored footprints.</p>
+          </div>
+        </div>
+
+        <div class="last3-history-list" style="margin-top: 16px;">
+          ${footprints.length === 0 ? '<div class="empty-state" style="padding:16px;text-align:center;">No recent trips found.</div>' : ''}
+          ${footprintRows}
+        </div>
+      </div>
+    `;
+  }
+
   // --- Two-Way Digital Footprint: Driver Verification & Safety Card Modal ---
   openDriverVerificationModal(driver = this.activeDriver) {
     const modal = document.getElementById("driver-safety-card-modal");
@@ -190,7 +233,15 @@ export class TransitSafetyManager {
       status: "active_trip"
     };
 
-    store.recordDigitalFootprint(digitalFootprint);
+    store.recordDigitalFootprint(digitalFootprint).then(() => {
+      if (typeof reviewsManager !== 'undefined' && reviewsManager) {
+        const targetGuideId=driver.id || driver.uid || driver.vehicleRegNo;
+        reviewsManager.renderGuideLedger(driver.id || driver.uid, "guide-ledger-container");
+      if(document.getElementsById("guide-self-ledger")){
+        reviewsManager.renderGuideLedger(driver.id || driver.uid, "guide-self-ledger");
+      }
+      }
+    });
 
     container.innerHTML = `
       <div class="driver-safety-dossier animate-slide-up">
@@ -319,30 +370,26 @@ export class TransitSafetyManager {
           <div class="method-card">
             <label><strong>1. Enter Vehicle Number Plate (from vehicle or meter):</strong></label>
             <div class="plate-input-row">
-              <input type="text" id="manual-plate-input" placeholder="e.g. GJ-06-AU-7892" value="GJ-06-AU-7892" class="plate-text-input">
-              <button type="button" class="btn btn-primary" id="anchor-plate-btn">
-                <i class="fas fa-shield-check"></i> Anchor Footprint
-              </button>
+              <input type="text" id="manual-plate-input" placeholder="e.g. GJ-06-AU-7892" value="GJ-06-AU-7892" class="plate-text-input" style="width: 100%; margin-bottom: 12px;">
             </div>
-            <span class="input-hint"><i class="fas fa-info-circle"></i> Checks Vadodara RTO database & attaches vehicle ID to police GPS radar.</span>
-          </div>
-
-          <!-- Method 2: Instant No-App Web Slip for Driver -->
-          <div class="method-card" style="margin-top: 14px;">
-            <label><strong>2. Show This Web Slip to Driver (No App Download Needed):</strong></label>
-            <p style="font-size: 11px; color: #64748b; margin-bottom: 8px;">The driver can point their phone camera to view their passenger verification card and agreed fare instantly in any browser:</p>
             
-            <div class="driver-web-qr-box">
-              <div id="driver-web-slip-qr"></div>
-              <div class="web-qr-info">
-                <span class="web-badge">Standard Browser Web Slip</span>
-                <span class="web-url">verida.app/slip/trv_${store.activeUser.name.slice(0,3)}</span>
-                <span class="web-fare">Agreed Fare: <strong>₹${this.activeRoute.fairRange.median}</strong></span>
-              </div>
+            <label><strong>2. Select Route via Google Maps Location API:</strong></label>
+            <div class="route-input-group" style="margin-top: 8px;">
+              <input type="text" id="gmaps-from-input" class="plate-text-input" placeholder="Pickup Location" style="width: 100%; margin-bottom: 8px;">
+              <input type="text" id="gmaps-to-input" class="plate-text-input" placeholder="Destination / Local Hotspot" style="width: 100%; margin-bottom: 12px;">
             </div>
+
+            <div id="zero-app-mini-map" style="height: 150px; width: 100%; border-radius: 8px; margin-bottom: 12px; background: #e2e8f0; display:flex; align-items:center; justify-content:center; overflow: hidden;">
+               <span style="font-size:12px;color:#64748b;">Loading Maps API...</span>
+            </div>
+
+            <button type="button" class="btn btn-primary btn-block" id="anchor-plate-btn">
+              <i class="fas fa-shield-check"></i> Anchor Footprint & Allow GPS
+            </button>
+            <span class="input-hint" style="display:block;margin-top:8px;"><i class="fas fa-info-circle"></i> Will securely ping your live GPS to RTO database.</span>
           </div>
 
-          <!-- Method 3: Instant WhatsApp Safety Beacon -->
+          <!-- Method 2: Instant WhatsApp Safety Beacon -->
           <div class="method-card" style="margin-top: 14px;">
             <button type="button" class="btn btn-danger btn-block" id="broadcast-beacon-btn">
               <i class="fas fa-broadcast-tower"></i> Broadcast Safety Beacon to Family & Police
@@ -355,43 +402,66 @@ export class TransitSafetyManager {
 
     modal.classList.add("active");
 
-    // Render QR for driver web slip
+    // Initialize Google Places Autocomplete and Mini Map
     setTimeout(() => {
-      const qrBox = document.getElementById("driver-web-slip-qr");
-      if (qrBox && typeof QRCode !== "undefined") {
-        qrBox.innerHTML = "";
-        new QRCode(qrBox, {
-          text: `https://verida.app/slip?p=${encodeURIComponent(store.activeUser.name)}&r=${encodeURIComponent(this.activeRoute.toName)}&fare=${this.activeRoute.fairRange.median}`,
-          width: 90,
-          height: 90,
-          colorDark: "#0f172a",
-          colorLight: "#ffffff"
-        });
+      if (typeof google !== "undefined" && google.maps && google.maps.places) {
+        const fromInput = document.getElementById("gmaps-from-input");
+        const toInput = document.getElementById("gmaps-to-input");
+        const mapDiv = document.getElementById("zero-app-mini-map");
+
+        if (fromInput) new google.maps.places.Autocomplete(fromInput);
+        if (toInput) new google.maps.places.Autocomplete(toInput);
+        
+        if (mapDiv) {
+           const miniMap = new google.maps.Map(mapDiv, {
+             center: { lat: store.currentLocation.lat, lng: store.currentLocation.lng },
+             zoom: 14,
+             disableDefaultUI: true
+           });
+           new google.maps.Marker({
+             position: { lat: store.currentLocation.lat, lng: store.currentLocation.lng },
+             map: miniMap,
+             title: "Your Location"
+           });
+        }
       }
-    }, 100);
+    }, 200);
 
     // Anchor Vehicle Plate
     const anchorBtn = document.getElementById("anchor-plate-btn");
     if (anchorBtn) {
       anchorBtn.onclick = () => {
-        const plate = document.getElementById("manual-plate-input")?.value.trim() || "GJ-06-AU-7892";
-        modal.classList.remove("active");
-        
-        // Create custom driver profile from plate
-        const synthesizedDriver = {
-          id: `driver-manual-${plate}`,
-          name: "Registered Vadodara Transport Driver",
-          photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
-          phone: "+91 94260 55321",
-          vehicleType: "Auto-Rickshaw (Plate Anchored)",
-          vehicleRegNo: plate,
-          rtoLicenseNo: `GJ-06-RTO-${plate.slice(-4)}`,
-          govtIssuer: "Gujarat RTO Registered Vehicle",
-          rating: 4.9,
-          trustScore: 97
+        const processAnchor = () => {
+          const plate = document.getElementById("manual-plate-input")?.value.trim() || "GJ-06-AU-7892";
+          modal.classList.remove("active");
+          
+          const synthesizedDriver = {
+            id: `driver-manual-${plate}`,
+            name: "Registered Vadodara Transport Driver",
+            photo: "https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=150",
+            phone: "+91 94260 55321",
+            vehicleType: "Auto-Rickshaw (Plate Anchored)",
+            vehicleRegNo: plate,
+            rtoLicenseNo: `GJ-06-RTO-${plate.slice(-4)}`,
+            govtIssuer: "Gujarat RTO Registered Vehicle",
+            rating: 4.9,
+            trustScore: 97
+          };
+
+          this.openDriverVerificationModal(synthesizedDriver);
         };
 
-        this.openDriverVerificationModal(synthesizedDriver);
+        if (navigator.geolocation) {
+          navigator.geolocation.getCurrentPosition(
+            (pos) => processAnchor(),
+            (err) => {
+              alert("⚠️ Please allow GPS access to record your safe Digital Footprint.");
+              processAnchor();
+            }
+          );
+        } else {
+          processAnchor();
+        }
       };
     }
 
